@@ -6,30 +6,28 @@ emailed in by providers (provider_NNN_cases.json, produced by Program 1's
 case_editor.py) into a single master database, master_cases.json, which the
 later programs (LLM runner, answer scorer, LLM ranker) read.
 
+Everything is menu-driven - just run:  python3 merge_cases.py
+The program finds the provider files in the current folder, lets you choose
+which to merge, and asks about anything that needs a decision.
+
 Each incoming file is validated before anything is merged. Because case IDs
 embed the provider number (PPP-CCC), files from different providers can never
 collide; a case ID already present in the master can only come from the same
-provider re-sending an updated file. For those, the newer version (by
-updated_at) wins after a confirmation prompt (or automatically with --yes).
-
-Usage:
-    python3 merge_cases.py provider_003_cases.json provider_007_cases.json
-    python3 merge_cases.py --yes provider_003_cases.json
-    python3 merge_cases.py --list
+provider re-sending an updated file. For those, the program shows both
+versions and asks which to keep (suggesting the newer one).
 
 Requires only the Python 3 standard library.
 """
 
-import argparse
-import os
 import json
-import sys
+import os
+import re
 import tempfile
 from datetime import datetime
 
-from case_editor import FORMAT_VERSION, CaseStore, CaseStoreError
+from case_editor import FORMAT_VERSION, CaseStore, CaseStoreError, prompt
 
-DEFAULT_MASTER = "master_cases.json"
+MASTER_FILENAME = "master_cases.json"
 
 
 def parse_timestamp(value):
@@ -167,7 +165,7 @@ class MasterStore:
         return report
 
 
-# ---------- command-line interface ----------
+# ---------- interactive interface ----------
 
 
 def preview(case, limit=68):
@@ -175,71 +173,51 @@ def preview(case, limit=68):
     return flat if len(flat) <= limit else flat[: limit - 3] + "..."
 
 
-def ask_yes_no(question, auto_yes, default=False):
-    if auto_yes:
-        return True
-    try:
-        answer = input("{} [{}]: ".format(question, "Y/n" if default else "y/N")).strip().lower()
-    except EOFError:
-        print()
-        return default
+def ask_yes_no(question, default=False):
+    answer = prompt("{} [{}]: ".format(question, "Y/n" if default else "y/N")).strip().lower()
     if not answer:
         return default
     return answer in ("y", "yes")
 
 
-def make_conflict_prompt(auto_yes):
-    def on_conflict(existing, incoming):
-        old = parse_timestamp(existing.get("updated_at"))
-        new = parse_timestamp(incoming.get("updated_at"))
-        incoming_newer = old is not None and new is not None and new > old
-        print("\nConflict for case {}:".format(existing["case_id"]))
-        print(
-            "  in master : edited {}  ({} rubric items)  {}".format(
-                existing.get("updated_at"), len(existing["rubric"]), preview(existing)
-            )
+def on_conflict(existing, incoming):
+    old = parse_timestamp(existing.get("updated_at"))
+    new = parse_timestamp(incoming.get("updated_at"))
+    incoming_newer = old is not None and new is not None and new > old
+    print("\nCase {} differs between the master and the incoming file:".format(existing["case_id"]))
+    print(
+        "  in master : edited {}  ({} rubric items)  {}".format(
+            existing.get("updated_at"), len(existing["rubric"]), preview(existing)
         )
-        print(
-            "  incoming  : edited {}  ({} rubric items)  {}".format(
-                incoming.get("updated_at"), len(incoming["rubric"]), preview(incoming)
-            )
+    )
+    print(
+        "  incoming  : edited {}  ({} rubric items)  {}".format(
+            incoming.get("updated_at"), len(incoming["rubric"]), preview(incoming)
         )
-        if auto_yes:
-            print("  --yes: taking the {} version.".format("incoming" if incoming_newer else "master"))
-            return incoming_newer
-        return ask_yes_no(
-            "  Replace the master version with the incoming one?",
-            auto_yes=False,
-            default=incoming_newer,
-        )
-
-    return on_conflict
+    )
+    if incoming_newer:
+        print("  The incoming version is newer.")
+    return ask_yes_no(
+        "  Replace the master version with the incoming one?", default=incoming_newer
+    )
 
 
-def make_missing_prompt(auto_yes, prune):
-    def on_missing(existing):
-        print(
-            "\nCase {} is in the master but not in the incoming file "
-            "(the provider may have deleted it).".format(existing["case_id"])
-        )
-        if auto_yes or prune:
-            print("  {}: {} it.".format(
-                "--prune" if prune else "--yes",
-                "removing" if prune else "keeping",
-            ))
-            return prune
-        return ask_yes_no("  Remove it from the master?", auto_yes=False, default=False)
-
-    return on_missing
+def on_missing(existing):
+    print(
+        "\nCase {} is in the master but not in the incoming file "
+        "(the provider may have deleted it).".format(existing["case_id"])
+    )
+    print("  {}".format(preview(existing)))
+    return ask_yes_no("  Remove it from the master too?", default=False)
 
 
 def print_report(source, provider_number, report):
-    print("\nMerged {} (provider {}):".format(source, provider_number))
+    print("\nResult for {} (provider {}):".format(source, provider_number))
     labels = [
         ("added", "added"),
         ("updated", "updated to the newer version"),
         ("unchanged", "already in the master, unchanged"),
-        ("kept_existing", "conflicts resolved in favor of the master"),
+        ("kept_existing", "kept the master's version"),
         ("removed", "removed (deleted by the provider)"),
         ("missing_kept", "missing from the incoming file but kept"),
     ]
@@ -252,12 +230,12 @@ def print_report(source, provider_number, report):
 
 def list_master(master):
     if not master.cases:
-        print("The master file {} has no cases yet.".format(master.path))
+        print("\nThe master file has no cases yet.\n")
         return
     by_provider = {}
     for case in master.cases.values():
         by_provider.setdefault(case["provider_number"], []).append(case)
-    print("Master file {}: {} cases from {} provider(s)".format(
+    print("\nMaster file {}: {} cases from {} provider(s)".format(
         master.path, len(master.cases), len(by_provider)
     ))
     for provider_number in sorted(by_provider):
@@ -272,62 +250,103 @@ def list_master(master):
                 "" if len(case["rubric"]) == 1 else "s",
                 preview(case),
             ))
+    print()
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(
-        description="Merge provider case files into the master case database."
+def find_provider_files():
+    return sorted(
+        name for name in os.listdir(".") if re.fullmatch(r"provider_\d{3,}_cases\.json", name)
     )
-    parser.add_argument("provider_files", nargs="*", help="provider_NNN_cases.json files to merge")
-    parser.add_argument(
-        "-m", "--master", default=DEFAULT_MASTER,
-        help="master database file (default: {})".format(DEFAULT_MASTER),
-    )
-    parser.add_argument(
-        "-y", "--yes", action="store_true",
-        help="no prompts: newer updated_at wins conflicts; missing cases are kept",
-    )
-    parser.add_argument(
-        "--prune", action="store_true",
-        help="with --yes, also remove master cases the provider has deleted",
-    )
-    parser.add_argument(
-        "-l", "--list", action="store_true",
-        help="show the contents of the master file and exit",
-    )
-    args = parser.parse_args(argv)
 
-    try:
-        if args.list:
-            list_master(MasterStore.load(args.master))
-            return 0
 
-        if not args.provider_files:
-            parser.error("no provider files given (or use --list to inspect the master)")
+def choose_provider_files():
+    """Show the provider files in this folder and ask which to merge."""
+    files = find_provider_files()
+    if not files:
+        print("\nNo provider case files (provider_NNN_cases.json) were found in this folder.")
+        print("Copy the files the providers emailed you into this folder, then try again.")
+        name = prompt("Or type a file name to merge (press Enter to go back): ").strip()
+        return [name] if name else []
 
-        master = MasterStore.load_or_create(args.master)
-        # Validate every file up front so one bad file aborts the whole run
-        # before the master is touched.
-        provider_stores = [CaseStore.load(path) for path in args.provider_files]
-    except (CaseStoreError, OSError) as e:
-        print("Error: {}".format(e))
-        return 1
+    print("\nProvider case files found in this folder:")
+    for i, name in enumerate(files, start=1):
+        print("  {}. {}".format(i, name))
+    raw = prompt(
+        "Which do you want to merge? Enter numbers like 1,3 or A for all\n"
+        "(or type a different file name; press Enter to go back): "
+    ).strip()
+    if not raw:
+        return []
+    if raw.lower() in ("a", "all"):
+        return files
+    if re.fullmatch(r"[\d,\s]+", raw):
+        chosen = []
+        for part in raw.replace(",", " ").split():
+            number = int(part)
+            if not 1 <= number <= len(files):
+                print("There is no file number {}. Please try again.".format(number))
+                return []
+            if files[number - 1] not in chosen:
+                chosen.append(files[number - 1])
+        return chosen
+    return [raw]
 
-    for path, provider_store in zip(args.provider_files, provider_stores):
+
+def merge_files(master):
+    paths = choose_provider_files()
+    if not paths:
+        return
+    # Validate every chosen file up front so one bad file stops the merge
+    # before the master is touched.
+    provider_stores = []
+    for path in paths:
+        try:
+            provider_stores.append(CaseStore.load(path))
+        except (CaseStoreError, OSError) as e:
+            print("\nProblem with {}: {}".format(path, e))
+            print("Nothing was merged. Ask the provider to re-send the file, then try again.\n")
+            return
+
+    for path, provider_store in zip(paths, provider_stores):
         report = master.merge_provider(
-            provider_store,
-            on_conflict=make_conflict_prompt(args.yes),
-            on_missing=make_missing_prompt(args.yes, args.prune),
+            provider_store, on_conflict=on_conflict, on_missing=on_missing
         )
         print_report(path, provider_store.provider_number, report)
+    master.save()
+    print("\nSaved {} ({} cases total).\n".format(master.path, len(master.cases)))
 
+
+def main():
+    print("=" * 60)
+    print("LLM Medical Cases - Case Merger (for the PI)")
+    print("=" * 60)
     try:
-        master.save()
-    except OSError as e:
-        print("Error saving {}: {}".format(args.master, e))
+        master = MasterStore.load_or_create(MASTER_FILENAME)
+    except (CaseStoreError, OSError) as e:
+        print("Error: {}".format(e))
+        prompt("Press Enter to close. ")
         return 1
-    print("\nSaved {} ({} cases total).".format(args.master, len(master.cases)))
-    return 0
+    if os.path.exists(MASTER_FILENAME):
+        print("Master file {}: {} case{} loaded.\n".format(
+            MASTER_FILENAME, len(master.cases), "" if len(master.cases) == 1 else "s"
+        ))
+    else:
+        print("No master file yet - {} will be created on the first merge.\n".format(
+            MASTER_FILENAME
+        ))
+
+    while True:
+        choice = prompt("[M]erge provider files  [L]ist the master  [Q]uit > ").strip().lower()
+        if choice == "q":
+            print("The master database is saved in {}.".format(MASTER_FILENAME))
+            prompt("Press Enter to close. ")
+            return 0
+        if choice == "m":
+            merge_files(master)
+        elif choice == "l":
+            list_master(master)
+        elif choice:
+            print("Please choose M, L, or Q.")
 
 
 if __name__ == "__main__":

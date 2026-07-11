@@ -13,7 +13,6 @@ Requires only the Python 3 standard library.
 import json
 import os
 import re
-import sys
 import tempfile
 from datetime import datetime, timezone
 
@@ -383,25 +382,27 @@ def ask_provider_number():
         print("The provider number must be a positive whole number.")
 
 
-def open_store(path_arg):
-    """Load an existing case file or create a new one, returning a CaseStore."""
-    if path_arg:
-        if os.path.exists(path_arg):
-            return CaseStore.load(path_arg)
-        provider_number = ask_provider_number()
-        store = CaseStore(provider_number, path_arg)
-        store.save()
-        return store
+def choose_from_list(names, question):
+    """Ask the user to pick one entry from a numbered list of file names."""
+    for i, name in enumerate(names, start=1):
+        print("  {}. {}".format(i, name))
+    while True:
+        raw = prompt(question).strip()
+        if raw.isdigit() and 1 <= int(raw) <= len(names):
+            return names[int(raw) - 1]
+        print("Please enter a number between 1 and {}.".format(len(names)))
 
+
+def open_store():
+    """Find this provider's case file in the current folder (or create one)."""
     existing = sorted(
-        name for name in os.listdir(".") if re.fullmatch(r"provider_\d{3}_cases\.json", name)
+        name for name in os.listdir(".") if re.fullmatch(r"provider_\d{3,}_cases\.json", name)
     )
     if len(existing) == 1:
         return CaseStore.load(existing[0])
     if len(existing) > 1:
-        print("Multiple case files found: {}".format(", ".join(existing)))
-        print("Run again with the file name, e.g.: python3 case_editor.py {}".format(existing[0]))
-        raise SystemExit(1)
+        print("More than one case file was found in this folder:")
+        return CaseStore.load(choose_from_list(existing, "Which one do you want to open? Enter its number: "))
 
     provider_number = ask_provider_number()
     path = FILENAME_TEMPLATE.format(provider_number)
@@ -413,19 +414,15 @@ def open_store(path_arg):
     return store
 
 
-def main(argv=None):
-    argv = sys.argv[1:] if argv is None else argv
-    if len(argv) > 1 or argv and argv[0] in ("-h", "--help"):
-        print("Usage: python3 case_editor.py [case_file.json]")
-        return 0
-
+def main():
     print("=" * 60)
     print("LLM Medical Cases - Case Editor")
     print("=" * 60)
     try:
-        store = open_store(argv[0] if argv else None)
+        store = open_store()
     except (CaseStoreError, OSError) as e:
         print("Error: {}".format(e))
+        prompt("Press Enter to close. ")
         return 1
 
     print(
@@ -454,6 +451,7 @@ def main(argv=None):
                     store.path
                 )
             )
+            prompt("Press Enter to close. ")
             return 0
         action = actions.get(choice)
         if action:

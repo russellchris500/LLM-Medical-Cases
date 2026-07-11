@@ -110,18 +110,21 @@ version. The provider case file produced by Program 1 looks like:
 }
 ```
 
-## Program 1 Usage
+Both programs are fully menu-driven — no command-line options to remember.
+You just run the program and answer its questions.
+
+## Program 1 Usage (for providers)
 
 Requires Python 3.8+ (standard library only — nothing to install).
 
 ```
-python3 case_editor.py            # uses/creates the case file in the current directory
-python3 case_editor.py mycases.json   # or specify a file explicitly
+python3 case_editor.py
 ```
 
 On first run you are asked for your preassigned provider number, and the file
-`provider_NNN_cases.json` is created. On later runs the same file is loaded
-automatically. A menu offers:
+`provider_NNN_cases.json` is created. On later runs the program finds that
+file in the same folder and loads it automatically (if several case files are
+present it shows a numbered list and asks which one to open). A menu offers:
 
 - **N** — create a new case (enter case text, then rubric items one per line)
 - **L** — list all cases
@@ -133,24 +136,28 @@ automatically. A menu offers:
 When your cases are ready, email your `provider_NNN_cases.json` file to the
 principal investigator.
 
-## Program 2 Usage
+## Program 2 Usage (for the PI)
 
-Requires Python 3.8+ (standard library only). Run it in the folder where you
-keep `master_cases.json` (it is created on the first merge).
+Requires Python 3.8+ (standard library only). Copy the `provider_NNN_cases.json`
+files the providers emailed you into one folder and run the program there:
 
 ```
-python3 merge_cases.py provider_003_cases.json provider_007_cases.json
-python3 merge_cases.py --yes provider_003_cases.json    # no prompts: newer version wins
-python3 merge_cases.py --yes --prune provider_003_cases.json  # also drop provider-deleted cases
-python3 merge_cases.py --list                            # show the master's contents
-python3 merge_cases.py -m study2_master.json --list      # use a different master file
+python3 merge_cases.py
 ```
+
+The master database `master_cases.json` is created in the same folder on the
+first merge and reloaded on later runs. The menu offers:
+
+- **M** — merge provider files: the program lists the provider files it finds
+  in the folder and you pick which to merge (e.g. `1,3`, or `A` for all)
+- **L** — list the master database, grouped by provider
+- **Q** — quit (the master is saved after every merge)
 
 Merging the same file twice is safe (already-merged cases are reported as
-unchanged). When a provider re-sends an updated file, changed cases trigger a
-confirmation prompt that defaults to the newer version; cases missing from the
-new file (deleted by the provider) are kept unless removal is confirmed or
-`--prune` is given.
+unchanged). When a provider re-sends an updated file, the program shows both
+versions of each changed case and asks which to keep, suggesting the newer
+one; cases missing from the new file (deleted by the provider) are kept
+unless you confirm their removal.
 
 ## Tests
 
