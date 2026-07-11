@@ -36,16 +36,20 @@ Used by each provider to create and edit cases.
   investigator (PI).
 - Providers can create, edit, view, list, and delete cases.
 
-### Program 2 — Case Merger (`merge_cases.py`) — planned
+### Program 2 — Case Merger (`merge_cases.py`) ✅ implemented
 
 Used by the PI to combine the case files received from multiple providers into a
 single master database (`master_cases.json`).
 
 - Validates each incoming file (format version, provider number consistency,
-  no duplicate case IDs, non-empty case text and rubric).
-- Merges into the master file, reporting any conflicts.
-- Supports re-importing an updated file from a provider (newer `updated_at`
-  wins, with a confirmation prompt).
+  no duplicate case IDs, non-empty case text and rubric). All files are
+  validated up front, so one bad file aborts the run before the master is
+  touched.
+- Merges into the master file, reporting per file what was added, updated,
+  unchanged, or kept.
+- Supports re-importing an updated file from a provider: for a changed case
+  the PI is prompted (defaulting to the newer `updated_at` version), and
+  cases the provider deleted are kept unless the PI confirms removal.
 
 ### Program 3 — LLM Runner (`run_llms.py`) — planned
 
@@ -129,8 +133,27 @@ automatically. A menu offers:
 When your cases are ready, email your `provider_NNN_cases.json` file to the
 principal investigator.
 
+## Program 2 Usage
+
+Requires Python 3.8+ (standard library only). Run it in the folder where you
+keep `master_cases.json` (it is created on the first merge).
+
+```
+python3 merge_cases.py provider_003_cases.json provider_007_cases.json
+python3 merge_cases.py --yes provider_003_cases.json    # no prompts: newer version wins
+python3 merge_cases.py --yes --prune provider_003_cases.json  # also drop provider-deleted cases
+python3 merge_cases.py --list                            # show the master's contents
+python3 merge_cases.py -m study2_master.json --list      # use a different master file
+```
+
+Merging the same file twice is safe (already-merged cases are reported as
+unchanged). When a provider re-sends an updated file, changed cases trigger a
+confirmation prompt that defaults to the newer version; cases missing from the
+new file (deleted by the provider) are kept unless removal is confirmed or
+`--prune` is given.
+
 ## Tests
 
 ```
-python3 -m unittest test_case_editor.py
+python3 -m unittest test_case_editor.py test_merge_cases.py
 ```
