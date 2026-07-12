@@ -268,24 +268,22 @@ to the scorer. The matching `<name>_KEY_DO_NOT_SEND.json` reveals which AI
 wrote each answer: it stays with you and is needed later by the ranker.
 **Never send the key file to a scorer.**
 
-## Program 5 Usage (for the scorer)
+## Program 5 (for the scorer) — double-click `score_answers.py`
 
-Save the zip you were emailed and `score_answers.py` into one folder (nothing
-else is needed — the program is self-contained) and run:
-
-```
-python3 score_answers.py
-```
-
-The program finds the zip by itself, asks for your name or initials, and
-walks you through every ungraded answer: the case text, the answer (with any
-images, which it can open for you), the rubric one item at a time (y/n), and
-— when every item is covered — two follow-up questions (unnecessary risk?
-poor approach?) from which the 0/1/2 score is computed automatically.
-Stop anytime with S — everything you finish is saved to
-`scores_<package>.json` immediately, and running the program again continues
-where you left off. **P** shows progress, **R** re-grades a single answer.
-When everything is graded, email the scores file back to the PI.
+Only `score_answers.py` is needed — the program is fully self-contained.
+When it starts it asks **where the zip you were emailed is saved** (a normal
+folder-chooser box — point it at your Downloads folder, for example), finds
+the package there, and asks your name once. The window shows the answer list
+on the left (with each score as you go) and, on the right, the case text,
+the anonymized answer, an **Open the images** button when the answer has
+figures, and the rubric with **Covered / Missed** buttons per item. When
+every item is covered, the two follow-up questions (unnecessary risk? poor
+approach?) light up, the 0/1/2 score is shown live with its reason, and
+**Save grade + next** moves on. Every grade is saved instantly to
+`scores_<package>.json` **in the same folder as the zip**; close the window
+anytime and reopen later to continue, or click any answer in the list to
+re-grade it (previous judgments are pre-filled). When everything is graded,
+email the scores file back to the PI.
 
 ## Program 6 (for the PI) — double-click `Rank LLMs.pyw`
 

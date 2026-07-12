@@ -10,12 +10,14 @@ rubric. Each answer gets a score of 0, 1, or 2:
   1 - every rubric item is covered, but the approach is poor
   2 - every rubric item is covered and the approach is acceptable
 
-It is a normal window-based program: put this file in the same folder as
-the zip you were emailed and double-click it (or run: py score_answers.py).
+It is a normal window-based program: double-click it (or run:
+py score_answers.py) and it first asks WHERE the zip you were emailed is
+saved - point it at that folder (for example your Downloads folder).
 
-Your grades are saved to scores_<package name>.json after every answer, so
-you can stop anytime and continue later. When you have graded everything,
-email that scores file back to the principal investigator.
+Your grades are saved to scores_<package name>.json in the same folder as
+the zip, after every answer, so you can stop anytime and continue later.
+When you have graded everything, email that scores file back to the
+principal investigator.
 
 This file is deliberately self-contained (Python 3.8+ standard library
 only, no other files from the project needed), so the PI can email a
@@ -356,7 +358,7 @@ class AnswerGrader:
 
 try:
     import tkinter as tk
-    from tkinter import messagebox, simpledialog, scrolledtext, ttk
+    from tkinter import filedialog, messagebox, simpledialog, scrolledtext, ttk
 
     TK_AVAILABLE = True
 except ImportError:  # pragma: no cover - servers without Tk still run tests
@@ -706,6 +708,39 @@ if TK_AVAILABLE:
             widget.insert("1.0", content)
             widget.configure(state="disabled")
 
+    def choose_package_folder(root):
+        """Ask where the scoring package zip lives; returns the folder or
+        None if the scorer gave up. Keeps asking until a folder with a
+        package in it is chosen."""
+        start_dir = os.path.dirname(os.path.abspath(__file__)) or os.getcwd()
+        while True:
+            folder = filedialog.askdirectory(
+                parent=root,
+                title="Where is the scoring package? Choose the folder that "
+                "contains the .zip you were emailed",
+                initialdir=start_dir,
+            )
+            if not folder:
+                # Cancelled: fall back to the program's own folder if the
+                # zip happens to be there, otherwise bow out politely.
+                if find_package_zips(start_dir):
+                    return start_dir
+                messagebox.showinfo(
+                    "No folder chosen",
+                    "To grade answers, start the program again and choose the "
+                    "folder where you saved the zip you were emailed.",
+                )
+                return None
+            if find_package_zips(folder):
+                return folder
+            if not messagebox.askretrycancel(
+                "No package there",
+                "No scoring package (.zip) was found in:\n{}\n\nChoose the "
+                "folder where you saved the zip you were emailed.".format(folder),
+            ):
+                return None
+            start_dir = folder
+
     def pick_zip(root, zips):
         if len(zips) == 1:
             return zips[0]
@@ -746,16 +781,14 @@ def main():
     root.title("LLM Medical Cases - Answer Scorer")
     root.geometry("980x720")
     root.withdraw()
-    zips = find_package_zips()
-    if not zips:
-        messagebox.showerror(
-            "No package found",
-            "No scoring package (.zip) was found in this folder.\n\nSave the zip "
-            "you were emailed into the same folder as this program and start it "
-            "again.",
-        )
+    folder = choose_package_folder(root)
+    if folder is None:
         root.destroy()
-        return 1
+        return 0
+    # Work inside the chosen folder: the grades file and any extracted
+    # images are saved next to the zip they belong to.
+    os.chdir(folder)
+    zips = find_package_zips()
     zip_name = pick_zip(root, zips)
     if not zip_name:
         root.destroy()
