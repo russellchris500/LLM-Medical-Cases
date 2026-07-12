@@ -254,7 +254,9 @@ class DriverTests(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(tmp, "x_page.png")))
 
     def test_all_sites_have_drivers_and_selectors(self):
-        for site_id in ("openevidence", "uptodate", "doximity"):
+        from llm_browser import BROWSER_MODEL_IDS
+        self.assertIn("chatgptclinicians", BROWSER_MODEL_IDS)
+        for site_id in BROWSER_MODEL_IDS:
             driver = make_driver(site_id)
             self.assertTrue(driver.home_url.startswith("https://"))
             for key in ("question_box", "submit_button", "answer_container", "login_form"):
