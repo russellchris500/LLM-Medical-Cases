@@ -18,6 +18,10 @@ import urllib.request
 # Injectable for tests.
 _urlopen = urllib.request.urlopen
 
+# Every request is a single, self-contained question: no conversation
+# history is ever sent, and no server-side storage is requested, so the
+# models have NO MEMORY between cases. Deep thinking is asked for in each
+# provider's own way (see build_request).
 API_REGISTRY = {
     "claude": {
         "display_name": "Anthropic Claude",
@@ -25,6 +29,7 @@ API_REGISTRY = {
         "url": "https://api.anthropic.com/v1/messages",
         "default_model": "claude-sonnet-4-5",
         "supports_temperature": True,
+        "thinking_budget": 10000,  # tokens of extended thinking when deep thinking is on
         "key_hint": "an Anthropic API key (console.anthropic.com)",
     },
     "gpt": {
@@ -34,6 +39,7 @@ API_REGISTRY = {
         "default_model": "gpt-5",
         # OpenAI reasoning models reject the temperature parameter.
         "supports_temperature": False,
+        "reasoning_effort": "high",  # sent when deep thinking is on
         "key_hint": "an OpenAI API key (platform.openai.com)",
     },
     "gemini": {
@@ -42,6 +48,8 @@ API_REGISTRY = {
         "url_template": "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         "default_model": "gemini-2.5-pro",
         "supports_temperature": True,
+        # -1 = dynamic thinking: the model thinks as long as it needs.
+        "thinking_budget": -1,
         "key_hint": "a Google AI API key (aistudio.google.com)",
     },
     "grok": {
@@ -50,6 +58,7 @@ API_REGISTRY = {
         "url": "https://api.x.ai/v1/chat/completions",
         "default_model": "grok-4",
         "supports_temperature": True,
+        # grok-4 always reasons deeply and accepts no effort parameter.
         "key_hint": "an xAI API key (console.x.ai)",
     },
 }
@@ -57,6 +66,9 @@ API_REGISTRY = {
 API_MODEL_IDS = list(API_REGISTRY)
 
 MAX_TOKENS = 8192
+# Claude's max_tokens must leave room for the thinking budget on top of
+# the visible answer.
+MAX_TOKENS_WITH_THINKING = 16384
 RETRYABLE_HTTP = (429, 500, 502, 503, 529)
 
 
@@ -73,8 +85,14 @@ def resolve_model(model_id, settings_entry):
     return override or API_REGISTRY[model_id]["default_model"]
 
 
-def build_request(model_id, api_key, model, prompt_text, temperature=0):
-    """Return (url, headers, body_dict) for one question."""
+def build_request(model_id, api_key, model, prompt_text, temperature=0, deep_thinking=True):
+    """Return (url, headers, body_dict) for one question.
+
+    The body always contains exactly one user message and asks for no
+    server-side storage, so nothing carries over between cases. With
+    deep_thinking on, each provider is asked to reason at length before
+    answering, in its own dialect.
+    """
     entry = API_REGISTRY[model_id]
     style = entry["style"]
     if style == "anthropic":
@@ -89,7 +107,15 @@ def build_request(model_id, api_key, model, prompt_text, temperature=0):
             "max_tokens": MAX_TOKENS,
             "messages": [{"role": "user", "content": prompt_text}],
         }
-        if entry["supports_temperature"]:
+        if deep_thinking and entry.get("thinking_budget"):
+            body["max_tokens"] = MAX_TOKENS_WITH_THINKING
+            body["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": entry["thinking_budget"],
+            }
+            # Anthropic requires the temperature to be left alone while
+            # extended thinking is enabled.
+        elif entry["supports_temperature"]:
             body["temperature"] = temperature
     elif style == "openai":
         url = entry["url"]
@@ -100,7 +126,12 @@ def build_request(model_id, api_key, model, prompt_text, temperature=0):
         body = {
             "model": model,
             "messages": [{"role": "user", "content": prompt_text}],
+            # Never store the exchange server-side: each case must be a
+            # clean slate with no memory.
+            "store": False,
         }
+        if deep_thinking and entry.get("reasoning_effort"):
+            body["reasoning_effort"] = entry["reasoning_effort"]
         if entry["supports_temperature"]:
             body["temperature"] = temperature
     elif style == "gemini":
@@ -110,8 +141,15 @@ def build_request(model_id, api_key, model, prompt_text, temperature=0):
             "x-goog-api-key": api_key,
         }
         body = {"contents": [{"parts": [{"text": prompt_text}]}]}
+        generation_config = {}
         if entry["supports_temperature"]:
-            body["generationConfig"] = {"temperature": temperature}
+            generation_config["temperature"] = temperature
+        if deep_thinking and entry.get("thinking_budget") is not None:
+            generation_config["thinkingConfig"] = {
+                "thinkingBudget": entry["thinking_budget"]
+            }
+        if generation_config:
+            body["generationConfig"] = generation_config
     else:
         raise ValueError("Unknown API style: {}".format(style))
     return url, headers, body
@@ -133,7 +171,9 @@ def parse_response(model_id, data):
             reported = data.get("model", "")
         else:  # gemini
             parts = data["candidates"][0]["content"]["parts"]
-            text = "".join(p.get("text", "") for p in parts)
+            # Parts flagged as "thought" are the model's internal reasoning,
+            # not the answer.
+            text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
             reported = data.get("modelVersion", "")
     except (KeyError, IndexError, TypeError) as e:
         raise ApiCallError("The response had an unexpected shape ({}).".format(e))
@@ -178,7 +218,13 @@ def call_api_model(model_id, settings_entry, prompt_text, options, log=print, sl
             )
         )
     model = resolve_model(model_id, settings_entry)
-    url, headers, body = build_request(model_id, api_key, model, prompt_text)
+    url, headers, body = build_request(
+        model_id,
+        api_key,
+        model,
+        prompt_text,
+        deep_thinking=options.get("deep_thinking", True),
+    )
     payload = json.dumps(body).encode("utf-8")
     timeout = options.get("request_timeout_s", 180)
     max_retries = options.get("max_retries", 5)

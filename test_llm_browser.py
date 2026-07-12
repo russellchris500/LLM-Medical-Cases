@@ -146,6 +146,18 @@ class DriverTests(unittest.TestCase):
         self.assertFalse(self.driver.is_logged_in(page))
         self.assertFalse(self.driver.is_logged_in(FakePage()))
 
+    def test_start_new_question_clicks_new_chat_button(self):
+        # No memory between cases: after navigating home, a visible
+        # "new chat" button is clicked so the site can't resume the
+        # previous conversation.
+        button = FakeElement()
+        page = FakePage({"[aria-label*='new chat' i]": [button]})
+        self.driver.start_new_question(page)
+        self.assertEqual(page.goto_urls, [self.driver.home_url])
+        self.assertTrue(button.clicked)
+        # And it is simply skipped when the site has no such button.
+        self.driver.start_new_question(FakePage())
+
     def test_submit_question_fills_and_clicks(self):
         box = FakeElement()
         button = FakeElement()

@@ -93,12 +93,13 @@ def model_catalog(settings):
     return catalog
 
 
-def new_record(case, model, prompt_sent):
+def new_record(case, model, prompt_sent, deep_thinking=True):
     return {
         "case_id": case["case_id"],
         "model_id": model["model_id"],
         "model_kind": model["kind"],
         "model_display_name": model["display_name"],
+        "deep_thinking": deep_thinking,
         "model_requested": "",
         "model_reported": "",
         "prompt_sent": prompt_sent,
@@ -403,7 +404,10 @@ def run_api_phase(master, answers, settings, models, todo):
             case = master.cases[case_id]
             label = "  [{:3d}/{}] {} x {} ".format(done, total, case_id, model["display_name"])
             print(label.ljust(46, "."), end=" ", flush=True)
-            record = new_record(case, model, render_prompt(case))
+            record = new_record(
+                case, model, render_prompt(case),
+                deep_thinking=bool(settings.option("deep_thinking")),
+            )
             started = time.monotonic()
             try:
                 if model["kind"] == "test":
@@ -547,7 +551,9 @@ def run_browser_site(master, answers, settings, model, case_ids):
                 case = master.cases[case_id]
                 prompt_text = render_prompt(case)
                 basename = answers.image_basename(case_id, site_id)
-                record = new_record(case, model, prompt_text)
+                # Browser sites think as deeply as their web product allows;
+                # a fresh conversation per case is what we control (below).
+                record = new_record(case, model, prompt_text, deep_thinking=True)
                 started = time.monotonic()
                 print(
                     "  [{:3d}/{}] {} x {}".format(
@@ -978,13 +984,20 @@ def options_menu(settings):
         print("\nOptions:")
         for i, (key, label) in enumerate(labels, start=1):
             print("  {}. {}: {}".format(i, label, settings.option(key)))
+        print("  {}. Deep thinking (models reason at length before answering): {}".format(
+            len(labels) + 1, "ON" if settings.option("deep_thinking") else "off"
+        ))
         print("  {}. Fake test model for trying things out: {}".format(
-            len(labels) + 1, "ON" if settings.option("enable_test_model") else "off"
+            len(labels) + 2, "ON" if settings.option("enable_test_model") else "off"
         ))
         raw = prompt("Enter a number to change it, or press Enter to go back: ").strip()
         if not raw:
             return
         if raw == str(len(labels) + 1):
+            settings.data["options"]["deep_thinking"] = not settings.option("deep_thinking")
+            settings.save()
+            continue
+        if raw == str(len(labels) + 2):
             settings.data["options"]["enable_test_model"] = not settings.option("enable_test_model")
             settings.save()
             continue

@@ -60,6 +60,14 @@ Used by the PI to run selected cases through selected LLMs.
 - **Browser models with no API** (OpenEvidence, UpToDate, Doximity GPT) are
   driven through a visible browser window with Playwright; answer text *and
   images* are captured, along with a full-page screenshot of every answer.
+- **Deep thinking, no memory.** Every model is asked to reason at length
+  before answering (Claude extended thinking, GPT high reasoning effort,
+  Gemini dynamic thinking; Grok 4 always reasons), and every case is a
+  completely fresh, single-question conversation: no history is ever sent,
+  no server-side storage is requested (`store: false` for OpenAI), and the
+  browser sites are steered to a brand-new chat for each case. Whether deep
+  thinking was on is recorded with every answer; it can be toggled in
+  Settings → Options.
 - Cases are selectable individually, as consecutive ranges
   (`003-001..003-020`), per provider, or all — and any selection can be
   **saved under a name and recalled later**, so the same case set can be run

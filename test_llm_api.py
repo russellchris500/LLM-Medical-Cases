@@ -78,19 +78,33 @@ class ApiTests(unittest.TestCase):
 
     # ----- request building -----
 
-    def test_anthropic_request_shape(self):
+    def test_anthropic_request_shape_deep_thinking(self):
         url, headers, body = build_request("claude", "sk-k", "claude-x", "Q?")
         self.assertEqual(url, "https://api.anthropic.com/v1/messages")
         self.assertEqual(headers["x-api-key"], "sk-k")
         self.assertIn("anthropic-version", headers)
         self.assertEqual(body["messages"][0]["content"], "Q?")
-        self.assertIn("max_tokens", body)
+        # Deep thinking on by default: thinking block present, max_tokens
+        # leaves room for it, and temperature is left alone.
+        self.assertEqual(body["thinking"]["type"], "enabled")
+        self.assertGreater(body["max_tokens"], body["thinking"]["budget_tokens"])
+        self.assertNotIn("temperature", body)
+
+    def test_anthropic_request_shape_thinking_off(self):
+        _, _, body = build_request("claude", "sk-k", "claude-x", "Q?", deep_thinking=False)
+        self.assertNotIn("thinking", body)
         self.assertEqual(body["temperature"], 0)
 
-    def test_openai_request_shape_no_temperature(self):
+    def test_openai_request_deep_thinking_and_no_memory(self):
         url, headers, body = build_request("gpt", "sk-k", "gpt-x", "Q?")
         self.assertEqual(headers["Authorization"], "Bearer sk-k")
         self.assertNotIn("temperature", body)  # reasoning models reject it
+        self.assertEqual(body["reasoning_effort"], "high")
+        self.assertIs(body["store"], False)  # nothing kept server-side
+        self.assertEqual(len(body["messages"]), 1)  # single message, no history
+        _, _, body = build_request("gpt", "sk-k", "gpt-x", "Q?", deep_thinking=False)
+        self.assertNotIn("reasoning_effort", body)
+        self.assertIs(body["store"], False)  # no-memory holds either way
 
     def test_gemini_request_shape(self):
         url, headers, body = build_request("gemini", "sk-k", "gemini-x", "Q?")
@@ -98,11 +112,18 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(headers["x-goog-api-key"], "sk-k")
         self.assertEqual(body["contents"][0]["parts"][0]["text"], "Q?")
         self.assertEqual(body["generationConfig"]["temperature"], 0)
+        self.assertEqual(
+            body["generationConfig"]["thinkingConfig"], {"thinkingBudget": -1}
+        )
+        _, _, body = build_request("gemini", "sk-k", "gemini-x", "Q?", deep_thinking=False)
+        self.assertNotIn("thinkingConfig", body["generationConfig"])
 
-    def test_grok_uses_openai_shape(self):
+    def test_grok_uses_openai_shape_no_effort_param(self):
         url, headers, body = build_request("grok", "sk-k", "grok-x", "Q?")
         self.assertIn("api.x.ai", url)
         self.assertIn("temperature", body)
+        # grok-4 reasons by default and accepts no effort parameter.
+        self.assertNotIn("reasoning_effort", body)
 
     # ----- response parsing -----
 
@@ -125,6 +146,25 @@ class ApiTests(unittest.TestCase):
             },
         )
         self.assertEqual((text, model), ("Answer.", "gemini-x-001"))
+
+    def test_gemini_thought_parts_excluded_from_answer(self):
+        text, _ = parse_response(
+            "gemini",
+            {
+                "modelVersion": "gemini-x-001",
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {"text": "Let me reason...", "thought": True},
+                                {"text": "Final answer."},
+                            ]
+                        }
+                    }
+                ],
+            },
+        )
+        self.assertEqual(text, "Final answer.")
 
     def test_malformed_response_raises_call_error(self):
         with self.assertRaises(ApiCallError):

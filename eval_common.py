@@ -286,6 +286,7 @@ DEFAULT_SETTINGS = {
         "doximity": {"username": "", "password": "", "last_login_ok": None},
     },
     "options": {
+        "deep_thinking": True,
         "request_timeout_s": 180,
         "max_retries": 5,
         "browser_question_delay_s": 8,

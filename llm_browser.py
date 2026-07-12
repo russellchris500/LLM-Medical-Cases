@@ -64,6 +64,7 @@ DEFAULT_SELECTORS = {
         "answer_images": ["img"],
         "username_field": ["input[type='email']", "input[name*='email' i]", "input[type='text']"],
         "password_field": ["input[type='password']"],
+        "new_chat": ["[aria-label*='new chat' i]", "[aria-label*='new question' i]", "[data-testid*='new-chat' i]"],
     },
     "uptodate": {
         "question_box": [
@@ -88,6 +89,7 @@ DEFAULT_SELECTORS = {
         "answer_images": ["img"],
         "username_field": ["input[name*='user' i]", "input[type='email']", "input[type='text']"],
         "password_field": ["input[type='password']"],
+        "new_chat": ["[aria-label*='new search' i]", "[aria-label*='new question' i]"],
     },
     "doximity": {
         "question_box": [
@@ -110,6 +112,7 @@ DEFAULT_SELECTORS = {
         "answer_images": ["img"],
         "username_field": ["input[type='email']", "input[name*='email' i]", "input[type='text']"],
         "password_field": ["input[type='password']"],
+        "new_chat": ["[aria-label*='new chat' i]", "[aria-label*='new question' i]", "[data-testid*='new-chat' i]"],
     },
 }
 
@@ -223,13 +226,22 @@ class SiteDriver:
     # ---- asking a question ----
 
     def start_new_question(self, page):
-        """Open a fresh question page so cases never share chat context."""
+        """Open a fresh conversation so cases never share chat context -
+        the sites must have NO MEMORY of earlier cases."""
         try:
             page.goto(self.home_url, wait_until="domcontentloaded")
         except Exception as e:
             raise BrowserStepError(
                 "navigation", "could not open {} ({})".format(self.home_url, e)
             )
+        # Some sites reopen the previous conversation on their home page;
+        # a visible "new chat"-style button is clicked when one exists.
+        button = find_first(page, self.selectors.get("new_chat", []))
+        if button is not None:
+            try:
+                button.click()
+            except Exception:
+                pass
 
     def baseline_text(self, page):
         """Text already on the page, so old content is never mistaken for
