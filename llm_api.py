@@ -10,6 +10,7 @@ Requires only the Python 3 standard library.
 
 import json
 import random
+import re
 import ssl
 import time
 import urllib.error
@@ -29,7 +30,11 @@ API_REGISTRY = {
         "url": "https://api.anthropic.com/v1/messages",
         "default_model": "claude-sonnet-4-5",
         "supports_temperature": True,
-        "thinking_budget": 10000,  # tokens of extended thinking when deep thinking is on
+        # Older Claude models (before 4.6) take a token budget for extended
+        # thinking; newer ones take an effort level instead. build_request
+        # picks the right dialect from the model name.
+        "thinking_budget": 10000,
+        "thinking_effort": "high",
         "key_hint": "an Anthropic API key (console.anthropic.com)",
     },
     "gpt": {
@@ -85,6 +90,37 @@ def resolve_model(model_id, settings_entry):
     return override or API_REGISTRY[model_id]["default_model"]
 
 
+# Full dates like 20250929 at the end of a model name are not version numbers.
+_DATE_DIGITS = re.compile(r"\d{8}")
+_VERSION_DIGITS = re.compile(r"\d{1,2}")
+
+
+def anthropic_thinking_mode(model):
+    """Return the thinking dialect a Claude model name expects.
+
+    "budget"   - Claude before 4.6 (e.g. claude-sonnet-4-5, claude-haiku-4-5):
+                 thinking is {"type": "enabled", "budget_tokens": N}.
+    "adaptive" - Claude 4.6 and later (claude-opus-4-8, claude-sonnet-5, ...):
+                 thinking is {"type": "adaptive"} and the amount of thinking
+                 is set with output_config {"effort": ...}. These models
+                 reject budget_tokens with an HTTP 400.
+    "always"   - Fable/Mythos models: thinking is always on and cannot be
+                 configured or disabled; only the effort level applies.
+
+    Unrecognized names are treated as "adaptive", since every new Claude
+    model from 4.6 on uses that form.
+    """
+    name = (model or "").lower()
+    if "fable" in name or "mythos" in name:
+        return "always"
+    digits = _VERSION_DIGITS.findall(_DATE_DIGITS.sub("", name))
+    if not digits:
+        return "adaptive"
+    major = int(digits[0])
+    minor = int(digits[1]) if len(digits) > 1 else 0
+    return "adaptive" if (major, minor) >= (4, 6) else "budget"
+
+
 def build_request(model_id, api_key, model, prompt_text, temperature=0, deep_thinking=True):
     """Return (url, headers, body_dict) for one question.
 
@@ -107,7 +143,21 @@ def build_request(model_id, api_key, model, prompt_text, temperature=0, deep_thi
             "max_tokens": MAX_TOKENS,
             "messages": [{"role": "user", "content": prompt_text}],
         }
-        if deep_thinking and entry.get("thinking_budget"):
+        mode = anthropic_thinking_mode(model)
+        if mode == "always":
+            # These models always think and reject any thinking config;
+            # only the effort level (and room for the thinking) is set.
+            body["max_tokens"] = MAX_TOKENS_WITH_THINKING
+            if deep_thinking:
+                body["output_config"] = {"effort": entry["thinking_effort"]}
+        elif mode == "adaptive":
+            if deep_thinking:
+                body["max_tokens"] = MAX_TOKENS_WITH_THINKING
+                body["thinking"] = {"type": "adaptive"}
+                body["output_config"] = {"effort": entry["thinking_effort"]}
+            # Never send temperature to a 4.6+ model: 4.7 and later reject
+            # sampling parameters outright.
+        elif deep_thinking and entry.get("thinking_budget"):
             body["max_tokens"] = MAX_TOKENS_WITH_THINKING
             body["thinking"] = {
                 "type": "enabled",

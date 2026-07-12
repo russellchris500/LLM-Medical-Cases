@@ -79,7 +79,8 @@ class ApiTests(unittest.TestCase):
     # ----- request building -----
 
     def test_anthropic_request_shape_deep_thinking(self):
-        url, headers, body = build_request("claude", "sk-k", "claude-x", "Q?")
+        # Older models (before Claude 4.6) still use a thinking token budget.
+        url, headers, body = build_request("claude", "sk-k", "claude-sonnet-4-5", "Q?")
         self.assertEqual(url, "https://api.anthropic.com/v1/messages")
         self.assertEqual(headers["x-api-key"], "sk-k")
         self.assertIn("anthropic-version", headers)
@@ -89,11 +90,64 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(body["thinking"]["type"], "enabled")
         self.assertGreater(body["max_tokens"], body["thinking"]["budget_tokens"])
         self.assertNotIn("temperature", body)
+        self.assertNotIn("output_config", body)
 
     def test_anthropic_request_shape_thinking_off(self):
-        _, _, body = build_request("claude", "sk-k", "claude-x", "Q?", deep_thinking=False)
+        _, _, body = build_request(
+            "claude", "sk-k", "claude-sonnet-4-5", "Q?", deep_thinking=False
+        )
         self.assertNotIn("thinking", body)
         self.assertEqual(body["temperature"], 0)
+
+    def test_anthropic_new_models_use_adaptive_thinking(self):
+        # Claude 4.6+ rejects budget_tokens; it wants adaptive thinking with
+        # an effort level, and no sampling parameters.
+        for model in ("claude-opus-4-8", "claude-opus-4-6", "claude-sonnet-5"):
+            _, _, body = build_request("claude", "sk-k", model, "Q?")
+            self.assertEqual(body["thinking"], {"type": "adaptive"}, model)
+            self.assertEqual(body["output_config"], {"effort": "high"}, model)
+            self.assertNotIn("budget_tokens", body["thinking"], model)
+            self.assertNotIn("temperature", body, model)
+            self.assertEqual(body["max_tokens"], llm_api.MAX_TOKENS_WITH_THINKING)
+
+    def test_anthropic_adaptive_thinking_off_sends_no_knobs(self):
+        _, _, body = build_request(
+            "claude", "sk-k", "claude-opus-4-8", "Q?", deep_thinking=False
+        )
+        self.assertNotIn("thinking", body)
+        self.assertNotIn("output_config", body)
+        # Newer models reject temperature, so it is never sent to them.
+        self.assertNotIn("temperature", body)
+
+    def test_anthropic_always_thinking_models_send_effort_only(self):
+        # Fable/Mythos models always think: no thinking block at all, just
+        # the effort level (and room in max_tokens for the thinking).
+        _, _, body = build_request("claude", "sk-k", "claude-fable-5", "Q?")
+        self.assertNotIn("thinking", body)
+        self.assertEqual(body["output_config"], {"effort": "high"})
+        self.assertEqual(body["max_tokens"], llm_api.MAX_TOKENS_WITH_THINKING)
+        self.assertNotIn("temperature", body)
+        _, _, body = build_request(
+            "claude", "sk-k", "claude-fable-5", "Q?", deep_thinking=False
+        )
+        self.assertNotIn("thinking", body)
+        self.assertNotIn("output_config", body)
+        self.assertNotIn("temperature", body)
+
+    def test_anthropic_thinking_mode_classifier(self):
+        mode = llm_api.anthropic_thinking_mode
+        self.assertEqual(mode("claude-sonnet-4-5"), "budget")
+        self.assertEqual(mode("claude-haiku-4-5-20251001"), "budget")
+        self.assertEqual(mode("claude-3-5-sonnet-20241022"), "budget")
+        self.assertEqual(mode("claude-sonnet-4-6"), "adaptive")
+        self.assertEqual(mode("claude-opus-4-7"), "adaptive")
+        self.assertEqual(mode("claude-opus-4-8"), "adaptive")
+        self.assertEqual(mode("claude-sonnet-5"), "adaptive")
+        self.assertEqual(mode("claude-fable-5"), "always")
+        self.assertEqual(mode("Claude Fable 5.0"), "always")
+        self.assertEqual(mode("claude-mythos-5"), "always")
+        # Unknown future names default to the modern form.
+        self.assertEqual(mode("claude-next"), "adaptive")
 
     def test_openai_request_deep_thinking_and_no_memory(self):
         url, headers, body = build_request("gpt", "sk-k", "gpt-x", "Q?")

@@ -73,8 +73,11 @@ Used by the PI to run selected cases through selected LLMs.
   completely separate models. Changing the model name in Settings starts a
   fresh identity; the earlier answers stay under the old one.
 - **Deep thinking, no memory.** Every model is asked to reason at length
-  before answering (Claude extended thinking, GPT high reasoning effort,
-  Gemini dynamic thinking; Grok 4 always reasons), and every case is a
+  before answering (Claude extended/adaptive thinking — the right form is
+  picked automatically from the model name, so older models like
+  `claude-sonnet-4-5` and newer ones like `claude-opus-4-8` both work; GPT
+  high reasoning effort; Gemini dynamic thinking; Grok 4 always reasons),
+  and every case is a
   completely fresh, single-question conversation: no history is ever sent,
   no server-side storage is requested (`store: false` for OpenAI), and the
   browser sites are steered to a brand-new chat for each case. Whether deep
