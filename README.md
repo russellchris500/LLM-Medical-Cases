@@ -117,14 +117,31 @@ Used by the scorer (a provider) to grade the blinded answers in a package.
   judgments plus the scorer's name, emailed back to the PI, who joins them
   to models using the package's key file (matched by `package_id`).
 
-### Program 6 — LLM Ranker (`rank_llms.py`) — planned
+### Program 6 — LLM Ranker (`rank_llms.py`) ✅ implemented
 
-Used by the PI to aggregate scores and rank the LLMs.
+Used by the PI, after scorers email back their `scores_*.json` files, to rank
+the LLMs with an **Elo-type rating in which every LLM *and* every case has a
+rating**.
 
-- Joins `scores.json` files to the key files, then computes per-LLM metrics
-  on the 0–2 scale: average score, share of answers scoring 2 (and 0),
-  fraction of rubric items met, breakdowns by provider and by case.
-- Produces a summary table and CSV export for statistical analysis.
+- Every graded answer is one match between an LLM and a case: a score of
+  **2 is a win** for the LLM, **1 is a draw**, and **0 is a loss** (the case
+  beat the LLM).
+- Ratings are not updated game-by-game like chess Elo — that would depend on
+  the arbitrary order the matches are processed. Instead all ratings are
+  **fitted at once by logistic regression** (maximum likelihood on the Elo
+  win-probability curve), the better batch method: order-independent and
+  using every match simultaneously. Each LLM and case also gets one
+  imaginary drawn match against a 1500-rated opponent so perfect (or
+  winless) records stay finite.
+- The average case is anchored at 1500, so ratings read like chess ratings:
+  the LLM-minus-case gap gives the predicted chance the LLM handles that
+  case well. Higher LLM rating = stronger model; higher case rating =
+  harder case.
+- Joins the scores files to the PI's key files automatically (matched by
+  `package_id`) and warns about grades it cannot join.
+- Shows the LLM ranking (Elo, answers graded, average score, 2/1/0 counts)
+  and a case-difficulty table, and exports `ranking_results/` CSVs
+  (rankings, case difficulty, and every match for statistical analysis).
 
 ## Data Formats
 
@@ -271,6 +288,22 @@ Stop anytime with S — everything you finish is saved to
 where you left off. **P** shows progress, **R** re-grades a single answer.
 When everything is graded, email the scores file back to the PI.
 
+## Program 6 Usage (for the PI)
+
+Save the `scores_*.json` files the scorers emailed back into the study folder
+(the same one holding `scoring_packages/` with your key files) and run:
+
+```
+python3 rank_llms.py
+```
+
+The program lists what it found, joins each scores file to its key by
+`package_id` (warning about anything it cannot join), fits the ratings, and
+prints the ranking immediately. The menu then offers **L** (LLM rankings),
+**C** (case difficulty), **E** (export `ranking_results/llm_rankings.csv`,
+`case_difficulty.csv`, and `matches.csv`), and **Q**uit. Re-run it whenever
+another scores file arrives — it always refits from everything present.
+
 ## Files created alongside the programs
 
 | File / folder | Created by | Notes |
@@ -283,6 +316,8 @@ When everything is graded, email the scores file back to the PI.
 | `browser_profiles/` | Program 3 | remembered site logins |
 | `scoring_packages/` | Program 4 | zips to email + key files to keep |
 | `scores_<package>.json` | Program 5 | the scorer's grades — email back to the PI |
+| `ranking_results/` | Program 6 | ranking, case-difficulty, and match CSVs |
+| `ranking_results/` | Program 6 | ranking and match CSVs |
 
 ## Tests
 

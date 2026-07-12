@@ -11,3 +11,4 @@ scoring_packages/
 site_selectors.json
 scores_*.json
 *_images/
+ranking_results/
