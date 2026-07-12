@@ -202,10 +202,15 @@ class CaseStore:
         return case_text.rstrip(), cleaned
 
 
-# ---------- interactive interface ----------
+# ---------- window interface ----------
+#
+# The program is a Microsoft Windows-style application: run it (or double-
+# click "Case Editor.pyw") and work in the window. Tkinter is imported
+# lazily inside main() so the data logic above works everywhere.
 
 
 def prompt(message):
+    """Kept for backward compatibility with older helper scripts."""
     try:
         return input(message)
     except EOFError:
@@ -213,47 +218,10 @@ def prompt(message):
         raise SystemExit(0)
 
 
-def read_multiline(header):
-    print(header)
-    print("(Type the text; blank lines are allowed. Finish with a single '.' on its own line.)")
-    lines = []
-    while True:
-        line = prompt("> ")
-        if line.strip() == ".":
-            break
-        lines.append(line)
-    return "\n".join(lines).rstrip()
-
-
-def read_rubric_items(existing_count=0):
-    print("Enter rubric items, one per line. Press Enter on an empty line to finish.")
-    print("(For an answer to be correct it must match EVERY rubric item.)")
-    items = []
-    while True:
-        item = prompt("  rubric item {}: ".format(existing_count + len(items) + 1)).strip()
-        if not item:
-            break
-        items.append(item)
-    return items
-
-
-def choose_case(store, action):
-    if not store.cases:
-        print("There are no cases yet.\n")
-        return None
-    list_cases(store)
-    raw = prompt("Case number to {} (blank to cancel): ".format(action)).strip()
-    if not raw:
-        return None
-    match = re.fullmatch(r"(?:\d{3}-)?0*(\d+)", raw)
-    if not match:
-        print("Please enter a case number such as 2 or 003-002.\n")
-        return None
-    case = store.get_case(int(match.group(1)))
-    if case is None:
-        print("No case with that number.\n")
-        return None
-    return case
+def find_case_files():
+    return sorted(
+        name for name in os.listdir(".") if re.fullmatch(r"provider_\d{3,}_cases\.json", name)
+    )
 
 
 def summarize(text, width=70):
@@ -261,206 +229,269 @@ def summarize(text, width=70):
     return flat if len(flat) <= width else flat[: width - 3] + "..."
 
 
-def list_cases(store):
-    print("\nCases for provider {} ({} total):".format(store.provider_number, len(store.cases)))
-    for case in store.cases:
-        print(
-            "  {}  [{} rubric item{}]  {}".format(
-                case["case_id"],
-                len(case["rubric"]),
-                "" if len(case["rubric"]) == 1 else "s",
-                summarize(case["case_text"]),
-            )
+class CaseEditorApp:
+    def __init__(self, root, store, gui):
+        self.root = root
+        self.store = store
+        self.gui = gui
+        self.tk = gui.tk
+        self.current_number = None  # None = editing a brand-new case
+        self.loaded_snapshot = ("", "")
+        self._build()
+        self.refresh_list()
+        if self.store.cases:
+            self.select_case(self.store.cases[0]["case_number"])
+        else:
+            self.start_new_case()
+        root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def _build(self):
+        tk = self.tk
+        top = tk.Label(
+            self.root,
+            text="Provider {} - cases are saved to {} - email that file to the "
+            "principal investigator".format(self.store.provider_number, self.store.path),
+            anchor="w",
         )
-    print()
+        top.pack(fill="x", padx=8, pady=(8, 0))
 
+        pane = tk.PanedWindow(self.root, orient="horizontal", sashrelief="raised")
+        pane.pack(fill="both", expand=True, padx=8, pady=8)
 
-def show_case(case):
-    print("\nCase {}".format(case["case_id"]))
-    print("Created: {}   Last edited: {}".format(case["created_at"], case["updated_at"]))
-    print("-" * 60)
-    print(case["case_text"])
-    print("-" * 60)
-    print("Rubric (the answer must match EVERY item to be correct):")
-    for i, item in enumerate(case["rubric"], start=1):
-        print("  {}. {}".format(i, item))
-    print()
+        left = tk.Frame(pane)
+        tk.Label(left, text="Your cases:", anchor="w").pack(fill="x")
+        self.case_list = tk.Listbox(left, exportselection=False)
+        self.case_list.pack(fill="both", expand=True, pady=4)
+        self.case_list.bind("<<ListboxSelect>>", self.on_list_click)
+        buttons = tk.Frame(left)
+        buttons.pack(fill="x")
+        tk.Button(buttons, text="New case", command=self.start_new_case).pack(
+            side="left", padx=(0, 4)
+        )
+        tk.Button(buttons, text="Delete case", command=self.delete_case).pack(side="left")
+        pane.add(left, minsize=240)
 
+        right = tk.Frame(pane)
+        self.header = tk.Label(right, text="", anchor="w", font=("TkDefaultFont", 10, "bold"))
+        self.header.pack(fill="x")
+        tk.Label(right, text="Case text (the clinical vignette / question):", anchor="w").pack(
+            fill="x", pady=(6, 0)
+        )
+        self.case_text = self.gui.scrolledtext.ScrolledText(right, height=12, wrap="word", undo=True)
+        self.case_text.pack(fill="both", expand=True, pady=4)
+        tk.Label(
+            right,
+            text="Rubric - ONE item per line. For the answer to be correct it must "
+            "match EVERY item:",
+            anchor="w",
+        ).pack(fill="x")
+        self.rubric_text = self.gui.scrolledtext.ScrolledText(right, height=7, wrap="word", undo=True)
+        self.rubric_text.pack(fill="both", expand=True, pady=4)
+        bottom = tk.Frame(right)
+        bottom.pack(fill="x")
+        tk.Button(bottom, text="Save case", command=self.save_current).pack(side="left")
+        self.status = tk.Label(bottom, text="", anchor="w")
+        self.status.pack(side="left", fill="x", expand=True, padx=8)
+        pane.add(right)
 
-def create_case(store):
-    print("\n--- New case (will be {} ) ---".format(make_case_id(store.provider_number, store.next_case_number())))
-    case_text = read_multiline("Enter the case text:")
-    if not case_text.strip():
-        print("Cancelled: the case text was empty.\n")
-        return
-    rubric = read_rubric_items()
-    if not rubric:
-        print("Cancelled: a case needs at least one rubric item.\n")
-        return
-    case = store.add_case(case_text, rubric)
-    store.save()
-    print("Saved case {}.\n".format(case["case_id"]))
+    # ---- helpers ----
 
+    def editors_content(self):
+        case_text = self.case_text.get("1.0", "end").rstrip()
+        rubric = [
+            line.strip()
+            for line in self.rubric_text.get("1.0", "end").splitlines()
+            if line.strip()
+        ]
+        return case_text, rubric
 
-def edit_rubric(store, case):
-    while True:
-        print("Rubric for case {}:".format(case["case_id"]))
-        for i, item in enumerate(case["rubric"], start=1):
-            print("  {}. {}".format(i, item))
-        choice = prompt("Rubric: [A]dd, [E]dit #, [R]emove #, or Enter when done: ").strip().lower()
-        if not choice:
+    def dirty(self):
+        case_text, rubric = self.editors_content()
+        return (case_text, "\n".join(rubric)) != self.loaded_snapshot
+
+    def set_status(self, message):
+        self.status.configure(text=message)
+
+    def refresh_list(self, keep=None):
+        self.case_list.delete(0, "end")
+        for case in self.store.cases:
+            self.case_list.insert(
+                "end",
+                "{}  [{} rubric item{}]  {}".format(
+                    case["case_id"],
+                    len(case["rubric"]),
+                    "" if len(case["rubric"]) == 1 else "s",
+                    summarize(case["case_text"], 40),
+                ),
+            )
+        if keep is not None:
+            for i, case in enumerate(self.store.cases):
+                if case["case_number"] == keep:
+                    self.case_list.selection_clear(0, "end")
+                    self.case_list.selection_set(i)
+                    self.case_list.see(i)
+
+    def offer_save_if_dirty(self):
+        """Returns False if the user cancelled the switch."""
+        if not self.dirty():
+            return True
+        answer = self.gui.messagebox.askyesnocancel(
+            "Unsaved changes",
+            "This case has unsaved changes.\n\nSave them first?",
+            parent=self.root,
+        )
+        if answer is None:
+            return False
+        if answer:
+            return self.save_current()
+        return True
+
+    # ---- actions ----
+
+    def on_list_click(self, _event):
+        selection = self.case_list.curselection()
+        if not selection:
             return
-        rubric = list(case["rubric"])
-        if choice == "a":
-            rubric.extend(read_rubric_items(existing_count=len(rubric)))
-        elif choice[0] in ("e", "r"):
-            number = choice[1:].strip() or prompt("Which item number? ").strip()
-            if not number.isdigit() or not 1 <= int(number) <= len(rubric):
-                print("There is no rubric item {}.".format(number or "?"))
-                continue
-            index = int(number) - 1
-            if choice[0] == "r":
-                if len(rubric) == 1:
-                    print("A case must keep at least one rubric item.")
-                    continue
-                removed = rubric.pop(index)
-                print("Removed: {}".format(removed))
+        case = self.store.cases[selection[0]]
+        if case["case_number"] == self.current_number:
+            return
+        if not self.offer_save_if_dirty():
+            self.refresh_list(keep=self.current_number)
+            return
+        self.select_case(case["case_number"])
+
+    def select_case(self, case_number):
+        case = self.store.get_case(case_number)
+        if case is None:
+            return
+        self.current_number = case_number
+        self.header.configure(text="Case {}".format(case["case_id"]))
+        self.case_text.delete("1.0", "end")
+        self.case_text.insert("1.0", case["case_text"])
+        self.rubric_text.delete("1.0", "end")
+        self.rubric_text.insert("1.0", "\n".join(case["rubric"]))
+        self.loaded_snapshot = (case["case_text"], "\n".join(case["rubric"]))
+        self.refresh_list(keep=case_number)
+        self.set_status("")
+
+    def start_new_case(self):
+        if not self.offer_save_if_dirty():
+            return
+        self.current_number = None
+        next_id = make_case_id(self.store.provider_number, self.store.next_case_number())
+        self.header.configure(text="New case (will be saved as {})".format(next_id))
+        self.case_text.delete("1.0", "end")
+        self.rubric_text.delete("1.0", "end")
+        self.loaded_snapshot = ("", "")
+        self.case_list.selection_clear(0, "end")
+        self.set_status("Type the case text and rubric, then click Save case.")
+        self.case_text.focus_set()
+
+    def save_current(self):
+        case_text, rubric = self.editors_content()
+        try:
+            if self.current_number is None:
+                case = self.store.add_case(case_text, rubric)
+                self.current_number = case["case_number"]
             else:
-                print("Current text: {}".format(rubric[index]))
-                new_item = prompt("New text (blank to keep): ").strip()
-                if new_item:
-                    rubric[index] = new_item
+                case = self.store.update_case(
+                    self.current_number, case_text=case_text, rubric=rubric
+                )
+            self.store.save()
+        except CaseStoreError as error:
+            self.gui.messagebox.showerror("Cannot save", str(error), parent=self.root)
+            return False
+        self.loaded_snapshot = (case["case_text"], "\n".join(case["rubric"]))
+        self.header.configure(text="Case {}".format(case["case_id"]))
+        self.refresh_list(keep=case["case_number"])
+        self.set_status("Saved case {}.".format(case["case_id"]))
+        return True
+
+    def delete_case(self):
+        if self.current_number is None:
+            self.gui.messagebox.showinfo(
+                "Nothing to delete", "This case has not been saved yet.", parent=self.root
+            )
+            return
+        case = self.store.get_case(self.current_number)
+        if not self.gui.messagebox.askyesno(
+            "Delete case",
+            "Really delete case {}?\n\nThis cannot be undone.".format(case["case_id"]),
+            parent=self.root,
+        ):
+            return
+        self.store.delete_case(self.current_number)
+        self.store.save()
+        self.set_status("Deleted case {}.".format(case["case_id"]))
+        self.current_number = None
+        self.refresh_list()
+        if self.store.cases:
+            self.select_case(self.store.cases[0]["case_number"])
         else:
-            print("Please choose A, E, or R (e.g. 'e2' edits item 2).")
-            continue
-        store.update_case(case["case_number"], rubric=rubric)
-        store.save()
-        print("Rubric saved.")
+            self.start_new_case()
+
+    def on_close(self):
+        if self.offer_save_if_dirty():
+            self.root.destroy()
 
 
-def edit_case(store):
-    case = choose_case(store, "edit")
-    if case is None:
-        return
-    show_case(case)
-    if prompt("Replace the case text? [y/N]: ").strip().lower() == "y":
-        new_text = read_multiline("Enter the new case text:")
-        if new_text.strip():
-            store.update_case(case["case_number"], case_text=new_text)
-            store.save()
-            print("Case text saved.")
-        else:
-            print("Kept the existing case text (new text was empty).")
-    edit_rubric(store, case)
-    print("Finished editing case {}.\n".format(case["case_id"]))
+class _GuiModules:
+    """Small namespace so CaseEditorApp can reach tk pieces passed from main()."""
+
+    def __init__(self, tk, messagebox, scrolledtext):
+        self.tk = tk
+        self.messagebox = messagebox
+        self.scrolledtext = scrolledtext
 
 
-def view_case(store):
-    case = choose_case(store, "view")
-    if case is not None:
-        show_case(case)
+def open_store_with_dialogs(root):
+    import gui_common
 
-
-def delete_case(store):
-    case = choose_case(store, "delete")
-    if case is None:
-        return
-    show_case(case)
-    if prompt("Really delete case {}? Type 'yes' to confirm: ".format(case["case_id"])).strip().lower() == "yes":
-        store.delete_case(case["case_number"])
-        store.save()
-        print("Deleted case {}.\n".format(case["case_id"]))
-    else:
-        print("Not deleted.\n")
-
-
-def ask_provider_number():
-    while True:
-        raw = prompt("Enter your preassigned provider number: ").strip()
-        if raw.isdigit() and int(raw) > 0:
-            return int(raw)
-        print("The provider number must be a positive whole number.")
-
-
-def choose_from_list(names, question):
-    """Ask the user to pick one entry from a numbered list of file names."""
-    for i, name in enumerate(names, start=1):
-        print("  {}. {}".format(i, name))
-    while True:
-        raw = prompt(question).strip()
-        if raw.isdigit() and 1 <= int(raw) <= len(names):
-            return names[int(raw) - 1]
-        print("Please enter a number between 1 and {}.".format(len(names)))
-
-
-def open_store():
-    """Find this provider's case file in the current folder (or create one)."""
-    existing = sorted(
-        name for name in os.listdir(".") if re.fullmatch(r"provider_\d{3,}_cases\.json", name)
+    files = find_case_files()
+    if len(files) == 1:
+        return CaseStore.load(files[0])
+    if files:
+        name = gui_common.pick_from_list(
+            root,
+            "Open case file",
+            "More than one case file was found in this folder.\nWhich one do you "
+            "want to open?",
+            files,
+        )
+        return CaseStore.load(name) if name else None
+    number = gui_common.ask_int(
+        root, "Provider number", "Enter your preassigned provider number:"
     )
-    if len(existing) == 1:
-        return CaseStore.load(existing[0])
-    if len(existing) > 1:
-        print("More than one case file was found in this folder:")
-        return CaseStore.load(choose_from_list(existing, "Which one do you want to open? Enter its number: "))
-
-    provider_number = ask_provider_number()
-    path = FILENAME_TEMPLATE.format(provider_number)
+    if not number:
+        return None
+    path = FILENAME_TEMPLATE.format(number)
     if os.path.exists(path):
         return CaseStore.load(path)
-    store = CaseStore(provider_number, path)
+    store = CaseStore(number, path)
     store.save()
-    print("Created new case file {}.".format(path))
     return store
 
 
 def main():
-    print("=" * 60)
-    print("LLM Medical Cases - Case Editor")
-    print("=" * 60)
+    import tkinter as tk
+    from tkinter import messagebox, scrolledtext
+    import gui_common
+
+    root = gui_common.make_root("Case Editor (for providers)", 980, 640)
+    root.withdraw()
     try:
-        store = open_store()
-    except (CaseStoreError, OSError) as e:
-        print("Error: {}".format(e))
-        prompt("Press Enter to close. ")
+        store = open_store_with_dialogs(root)
+    except (CaseStoreError, OSError) as error:
+        gui_common.show_error("Cannot open the case file", str(error))
+        root.destroy()
         return 1
-
-    print(
-        "Provider {} - {} case{} in {}\n".format(
-            store.provider_number,
-            len(store.cases),
-            "" if len(store.cases) == 1 else "s",
-            store.path,
-        )
-    )
-
-    actions = {
-        "n": create_case,
-        "l": lambda s: list_cases(s),
-        "v": view_case,
-        "e": edit_case,
-        "d": delete_case,
-    }
-    while True:
-        choice = prompt(
-            "[N]ew case  [L]ist  [V]iew  [E]dit  [D]elete  [Q]uit > "
-        ).strip().lower()
-        if choice == "q":
-            print(
-                "All changes are saved in {}. Email that file to the principal investigator.".format(
-                    store.path
-                )
-            )
-            prompt("Press Enter to close. ")
-            return 0
-        action = actions.get(choice)
-        if action:
-            try:
-                action(store)
-            except CaseStoreError as e:
-                print("Error: {}\n".format(e))
-        elif choice:
-            print("Please choose N, L, V, E, D, or Q.")
+    if store is None:
+        root.destroy()
+        return 0
+    CaseEditorApp(root, store, _GuiModules(tk, messagebox, scrolledtext))
+    root.deiconify()
+    root.mainloop()
+    return 0
 
 
 if __name__ == "__main__":

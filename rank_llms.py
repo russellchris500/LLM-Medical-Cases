@@ -26,7 +26,8 @@ How the rating works, in plain language:
   and every case is given one imaginary drawn match against an average
   (1500-rated) opponent.
 
-Everything is menu-driven - just run:  python3 rank_llms.py
+It is a window-based program - run it (or double-click "Rank LLMs.pyw");
+the ranking appears as soon as the files are read.
 Requires only the Python 3 standard library.
 """
 
@@ -36,7 +37,6 @@ import math
 import os
 import re
 
-from case_editor import prompt
 from eval_common import split_case_id
 
 ELO_CENTER = 1500.0
@@ -277,51 +277,6 @@ def summarize(matches):
     return per_model
 
 
-def show_rankings(matches, llm_ratings):
-    names = display_names()
-    per_model = summarize(matches)
-    ranked = sorted(llm_ratings.items(), key=lambda item: -item[1])
-    print("\nLLM rankings (higher Elo = stronger; average case = 1500):")
-    print("  {:>4}  {:22s} {:>6}  {:>7}  {:>9}  {:>13}".format(
-        "rank", "LLM", "Elo", "graded", "avg score", "2s / 1s / 0s"
-    ))
-    for rank, (model_id, rating) in enumerate(ranked, start=1):
-        stats = per_model[model_id]
-        print("  {:>4}  {:22s} {:>6.0f}  {:>7}  {:>9.2f}  {:>4} /{:>3} /{:>3}".format(
-            rank,
-            names.get(model_id, model_id)[:22],
-            rating,
-            stats["n"],
-            stats["sum"] / stats["n"],
-            stats["counts"][2], stats["counts"][1], stats["counts"][0],
-        ))
-    if len(ranked) >= 2:
-        (top_id, top_r), (second_id, second_r) = ranked[0], ranked[1]
-        p = expected_win(top_r, ELO_CENTER)
-        print(
-            "\n  Read it like chess ratings: {} is predicted to handle an\n"
-            "  average-difficulty case well {:.0f}% of the time.".format(
-                names.get(top_id, top_id), 100 * p
-            )
-        )
-
-
-def show_case_difficulty(matches, case_ratings):
-    per_case = {}
-    for match in matches:
-        stats = per_case.setdefault(match["case_id"], {"n": 0, "sum": 0})
-        stats["n"] += 1
-        stats["sum"] += match["score"]
-    ranked = sorted(case_ratings.items(), key=lambda item: -item[1])
-    print("\nCase difficulty (higher Elo = harder; average case = 1500):")
-    print("  {:10s} {:>6}  {:>7}  {:>9}".format("case", "Elo", "graded", "avg score"))
-    for case_id, rating in ranked:
-        stats = per_case[case_id]
-        print("  {:10s} {:>6.0f}  {:>7}  {:>9.2f}".format(
-            case_id, rating, stats["n"], stats["sum"] / stats["n"]
-        ))
-
-
 def export_csv(matches, llm_ratings, case_ratings):
     os.makedirs(RESULTS_DIR, exist_ok=True)
     names = display_names()
@@ -372,83 +327,144 @@ def export_csv(matches, llm_ratings, case_ratings):
     return [rankings_path, cases_path, matches_path]
 
 
-# ---------- main ----------
+# ---------- window interface ----------
 
 
 def main():
-    print("=" * 60)
-    print("LLM Medical Cases - LLM Ranker (for the PI)")
-    print("=" * 60)
+    import tkinter as tk
+    from tkinter import messagebox
+    import gui_common
+
+    root = gui_common.make_root("LLM Ranker (for the PI)", 1000, 640)
+    root.withdraw()
 
     scores_files = load_scores(find_scores_files())
     keys = load_keys(find_key_files())
     if not scores_files:
-        print(
-            "\nNo scores files (scores_*.json) were found in this folder.\n"
-            "Save the files the scorers emailed back here and run again."
+        gui_common.show_error(
+            "No scores files",
+            "No scores files (scores_*.json) were found in this folder.\n\n"
+            "Save the files the scorers emailed back next to this program and "
+            "start it again.",
         )
-        prompt("Press Enter to close. ")
+        root.destroy()
         return 1
     if not keys:
-        print(
-            "\nNo key files (*_KEY_DO_NOT_SEND.json) were found here or in {}/.\n"
+        gui_common.show_error(
+            "No key files",
+            "No key files (*_KEY_DO_NOT_SEND.json) were found here or in {}/.\n\n"
             "The ranker needs them to know which AI wrote each blinded "
-            "answer.".format(PACKAGES_DIR)
+            "answer.".format(PACKAGES_DIR),
         )
-        prompt("Press Enter to close. ")
+        root.destroy()
         return 1
 
     matches, warnings = build_matches(scores_files, keys)
-    print("\nFound {} scores file{} and {} key file{}.".format(
-        len(scores_files), "" if len(scores_files) == 1 else "s",
-        len(keys), "" if len(keys) == 1 else "s",
-    ))
-    for scores_file in scores_files:
-        print("  {}  (scorer: {}, {} grades)".format(
-            scores_file["path"], scores_file["scorer"] or "unnamed",
-            len(scores_file["records"]),
-        ))
-    for warning in warnings:
-        print("  Warning: {}".format(warning))
     if not matches:
-        print("\nNo grades could be joined to a key - nothing to rank.")
-        prompt("Press Enter to close. ")
+        gui_common.show_error(
+            "Nothing to rank",
+            "No grades could be joined to a key file.\n\n" + "\n".join(warnings[:8]),
+        )
+        root.destroy()
         return 1
+
+    llm_ratings, case_ratings, iterations = fit_ratings(matches)
+    names = display_names()
+    per_model = summarize(matches)
 
     llms = {m["model_id"] for m in matches}
     cases = {m["case_id"] for m in matches}
-    print("\n{} graded answers usable: {} LLM{} across {} case{}.".format(
-        len(matches), len(llms), "" if len(llms) == 1 else "s",
-        len(cases), "" if len(cases) == 1 else "s",
-    ))
-    print("Fitting Elo ratings to all matches at once (logistic regression)...")
-    llm_ratings, case_ratings, iterations = fit_ratings(matches)
-    print("Done ({} passes to converge).".format(iterations))
-    show_rankings(matches, llm_ratings)
+    summary = (
+        "{} scores file(s), {} graded answers usable: {} LLM(s) across {} case(s). "
+        "Ratings fitted to all matches at once (logistic regression, {} passes)."
+    ).format(len(scores_files), len(matches), len(llms), len(cases), iterations)
 
-    while True:
-        choice = prompt(
-            "\n[L] LLM rankings  [C]ase difficulty  [E]xport CSV files  [Q]uit > "
-        ).strip().lower()
-        if choice == "q":
-            prompt("Press Enter to close. ")
-            return 0
-        if choice == "l":
-            show_rankings(matches, llm_ratings)
-        elif choice == "c":
-            show_case_difficulty(matches, case_ratings)
-        elif choice == "e":
-            try:
-                paths = export_csv(matches, llm_ratings, case_ratings)
-            except OSError as e:
-                print("Could not write the CSV files: {}".format(e))
-                continue
-            print("Wrote:")
-            for path in paths:
-                print("  {}".format(path))
-            print("(matches.csv holds every graded answer for statistical analysis.)")
-        elif choice:
-            print("Please choose L, C, E, or Q.")
+    tk.Label(root, text=summary, anchor="w", justify="left", wraplength=960).pack(
+        fill="x", padx=8, pady=(8, 0)
+    )
+    if warnings:
+        warn_box = gui_common.LogBox(root, height=min(4, len(warnings)))
+        warn_box.pack(fill="x", padx=8, pady=(4, 0))
+        for warning in warnings:
+            warn_box.log("Warning: " + warning)
+
+    from tkinter import ttk
+
+    notebook = ttk.Notebook(root)
+    notebook.pack(fill="both", expand=True, padx=8, pady=8)
+
+    rank_frame = tk.Frame(notebook)
+    notebook.add(rank_frame, text="LLM rankings")
+    tk.Label(
+        rank_frame,
+        text="Higher Elo = stronger. The average case is 1500; a score of 2 is a "
+        "win for the LLM, 1 a draw, 0 a loss.",
+        anchor="w",
+    ).pack(fill="x", pady=(6, 0))
+    rank_tree = gui_common.make_table(
+        rank_frame,
+        [("rank", "Rank"), ("name", "LLM"), ("elo", "Elo"), ("n", "Graded"),
+         ("avg", "Avg score"), ("counts", "2s / 1s / 0s"), ("p", "Predicted win vs avg case")],
+        widths={"rank": 50, "name": 200, "elo": 70, "n": 70, "avg": 80,
+                "counts": 110, "p": 170},
+    )
+    ranked = sorted(llm_ratings.items(), key=lambda item: -item[1])
+    for rank, (model_id, rating) in enumerate(ranked, start=1):
+        stats = per_model[model_id]
+        rank_tree.insert("", "end", values=(
+            rank, names.get(model_id, model_id), "{:.0f}".format(rating), stats["n"],
+            "{:.2f}".format(stats["sum"] / stats["n"]),
+            "{} / {} / {}".format(stats["counts"][2], stats["counts"][1], stats["counts"][0]),
+            "{:.0f}%".format(100 * expected_win(rating, ELO_CENTER)),
+        ))
+    rank_tree.master.pack(fill="both", expand=True, pady=6)
+
+    case_frame = tk.Frame(notebook)
+    notebook.add(case_frame, text="Case difficulty")
+    tk.Label(
+        case_frame,
+        text="Higher Elo = harder case (the AIs scored worse on it).", anchor="w",
+    ).pack(fill="x", pady=(6, 0))
+    case_tree = gui_common.make_table(
+        case_frame,
+        [("case", "Case"), ("elo", "Elo"), ("n", "Graded"), ("avg", "Avg score")],
+        widths={"case": 100, "elo": 80, "n": 80, "avg": 90},
+    )
+    per_case = {}
+    for m in matches:
+        stats = per_case.setdefault(m["case_id"], {"n": 0, "sum": 0})
+        stats["n"] += 1
+        stats["sum"] += m["score"]
+    for case_id, rating in sorted(case_ratings.items(), key=lambda item: -item[1]):
+        stats = per_case[case_id]
+        case_tree.insert("", "end", values=(
+            case_id, "{:.0f}".format(rating), stats["n"],
+            "{:.2f}".format(stats["sum"] / stats["n"]),
+        ))
+    case_tree.master.pack(fill="both", expand=True, pady=6)
+
+    bottom = tk.Frame(root)
+    bottom.pack(fill="x", padx=8, pady=(0, 8))
+    status = tk.Label(bottom, text="", anchor="w")
+
+    def do_export():
+        try:
+            paths = export_csv(matches, llm_ratings, case_ratings)
+        except OSError as error:
+            messagebox.showerror("Could not write the files", str(error), parent=root)
+            return
+        status.configure(
+            text="Wrote {} (rankings, case difficulty, and every match).".format(
+                ", ".join(paths)
+            )
+        )
+
+    tk.Button(bottom, text="Export CSV files for analysis", command=do_export).pack(side="left")
+    status.pack(side="left", fill="x", expand=True, padx=8)
+
+    root.deiconify()
+    root.mainloop()
+    return 0
 
 
 if __name__ == "__main__":

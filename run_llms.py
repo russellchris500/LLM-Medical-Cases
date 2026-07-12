@@ -6,7 +6,8 @@ database (master_cases.json, built by Program 2) through a chosen set of
 LLMs, and to store every answer - text and images - in answers.json and
 answer_images/ for later scoring.
 
-Everything is menu-driven - just run:  python3 run_llms.py
+It is a window-based program - run it (or double-click "Run LLMs.pyw")
+and work in the window.
 
 Models:
 - API models (Anthropic Claude, OpenAI GPT, Google Gemini, xAI Grok) run
@@ -19,14 +20,13 @@ Requires Python 3.8+. The API models need nothing installed; the browser
 models need Playwright, which the Settings menu can install for you.
 """
 
-import getpass
 import os
 import subprocess
 import sys
 import time
 import random
 
-from case_editor import CaseStoreError, now_iso, prompt
+from case_editor import CaseStoreError, now_iso
 from merge_cases import MASTER_FILENAME, MasterStore
 from eval_common import (
     AnswersStore,
@@ -115,191 +115,11 @@ def new_record(case, model, prompt_sent, deep_thinking=True):
     }
 
 
-# ---------- case selection ----------
-
-
-def describe_selection(case_ids, limit=8):
-    if len(case_ids) <= limit:
-        return ", ".join(case_ids)
-    return "{} ... {} ({} in all)".format(
-        ", ".join(case_ids[:3]), ", ".join(case_ids[-2:]), len(case_ids)
-    )
-
-
-def choose_saved_set(case_sets, cases_by_id):
-    if not case_sets.sets:
-        print("There are no saved case sets yet.")
-        return None
-    names = sorted(case_sets.sets, key=str.lower)
-    print("Saved case sets:")
-    for i, name in enumerate(names, start=1):
-        entry = case_sets.sets[name]
-        print(
-            "  {}. {}  ({} cases; {})".format(
-                i, name, len(entry["case_ids"]), entry["expression"] or "chosen by hand"
-            )
-        )
-    raw = prompt("Which set? Enter its number (blank to cancel): ").strip()
-    if not raw:
-        return None
-    if not raw.isdigit() or not 1 <= int(raw) <= len(names):
-        print("There is no set number {}.".format(raw))
-        return None
-    name = names[int(raw) - 1]
-    present, missing = case_sets.resolve(name, cases_by_id)
-    if missing:
-        print(
-            "{} case{} in this set {} no longer in the master and will be "
-            "skipped: {}".format(
-                len(missing),
-                "" if len(missing) == 1 else "s",
-                "is" if len(missing) == 1 else "are",
-                ", ".join(missing),
-            )
-        )
-    if not present:
-        print("None of this set's cases are in the master database.")
-        return None
-    return present
-
-
-def offer_to_save_set(case_sets, expression, case_ids):
-    name = prompt(
-        "Save this selection as a named set for reuse? Name (blank for no): "
-    ).strip()
-    if not name:
-        return
-    try:
-        case_sets.add(name, expression, case_ids)
-        print("Saved case set '{}' ({} cases).".format(name, len(case_ids)))
-    except CaseStoreError as e:
-        print("Not saved: {}".format(e))
-
-
-def choose_cases(master, case_sets, header="Step 1 of 3 - choose the cases."):
-    cases_by_id = master.cases
-    providers = sorted({c["provider_number"] for c in cases_by_id.values()})
-    while True:
-        print("\n{}".format(header))
-        print("  [A]ll {} cases".format(len(cases_by_id)))
-        print("  [E]nter case IDs or ranges (e.g. 003-001..003-020, 005-004)")
-        print("  [P] all cases from one provider")
-        print("  [S]aved case set                     ({} saved)".format(len(case_sets.sets)))
-        choice = prompt("Choose A, E, P, or S (blank to cancel): ").strip().lower()
-        if not choice:
-            return None
-        if choice == "a":
-            return sort_case_ids(cases_by_id)
-        if choice == "s":
-            selected = choose_saved_set(case_sets, cases_by_id)
-            if selected:
-                return selected
-            continue
-        if choice == "p":
-            print("Providers with cases: {}".format(", ".join(str(p) for p in providers)))
-            raw = prompt("Which provider number? ").strip()
-            if not raw.isdigit():
-                continue
-            expression = "provider {}".format(int(raw))
-        elif choice == "e":
-            expression = prompt(
-                "Enter cases (comma-separated; ranges like 003-001..003-020): "
-            ).strip()
-            if not expression:
-                continue
-        else:
-            print("Please choose A, E, P, or S.")
-            continue
-
-        try:
-            selected, warnings = parse_selection(expression, cases_by_id)
-        except SelectionError as e:
-            print(str(e))
-            continue
-        for warning in warnings:
-            print("  Note: {}".format(warning))
-        if not selected:
-            print("That selection matched no cases.")
-            continue
-        print("Selected {} case{}: {}".format(
-            len(selected), "" if len(selected) == 1 else "s", describe_selection(selected)
-        ))
-        offer_to_save_set(case_sets, expression, selected)
-        return selected
-
-
-# ---------- model selection ----------
-
-
-def model_status_line(model, settings, answers, selected_cases):
-    parts = []
-    if model["kind"] == "api":
-        key = settings.api_model(model["model_id"]).get("api_key", "")
-        parts.append("API, key set" if key.strip() else "API, NO KEY - set it in Settings")
-    elif model["kind"] == "browser":
-        if not llm_browser.PLAYWRIGHT_AVAILABLE:
-            parts.append("browser, needs one-time setup (Settings)")
-        else:
-            last = settings.browser_model(model["model_id"]).get("last_login_ok")
-            parts.append(
-                "browser, login OK {}".format(last[:10]) if last else "browser, never logged in"
-            )
-    else:
-        parts.append("fake test model")
-    answered = sum(
-        1
-        for case_id in selected_cases
-        if (answers.get(case_id, model["model_id"]) or {}).get("status") in OK_STATUSES
-    )
-    parts.append("answered {}/{} of these".format(answered, len(selected_cases)))
-    return "; ".join(parts)
-
-
-def choose_models(settings, answers, selected_cases):
-    catalog = model_catalog(settings)
-    print("\nStep 2 of 3 - choose the LLMs.")
-    for i, model in enumerate(catalog, start=1):
-        print(
-            "  {}. {:18s} ({})".format(
-                i, model["display_name"], model_status_line(model, settings, answers, selected_cases)
-            )
-        )
-    raw = prompt("Enter numbers (e.g. 2,4,5) or A for all (blank to cancel): ").strip()
-    if not raw:
-        return None
-    if raw.lower() in ("a", "all"):
-        chosen = list(catalog)
-    else:
-        chosen = []
-        for part in raw.replace(",", " ").split():
-            if not part.isdigit() or not 1 <= int(part) <= len(catalog):
-                print("There is no model number {}.".format(part))
-                return None
-            model = catalog[int(part) - 1]
-            if model not in chosen:
-                chosen.append(model)
-
-    usable = []
-    for model in chosen:
-        if model["kind"] == "api" and not settings.api_model(model["model_id"]).get("api_key", "").strip():
-            print(
-                "Skipping {}: no API key. Add it in Settings first.".format(model["display_name"])
-            )
-        elif model["kind"] == "browser" and not llm_browser.PLAYWRIGHT_AVAILABLE:
-            print(
-                "Skipping {}: browser automation is not set up yet. Use "
-                "'Browser automation setup' in Settings first.".format(model["display_name"])
-            )
-        else:
-            usable.append(model)
-    return usable or None
-
-
-# ---------- run confirmation ----------
+# ---------- worklist ----------
 
 
 def build_worklist(master, answers, case_ids, models):
-    """Decide which (case, model) pairs actually need asking."""
+    """Split the requested (case, model) pairs by what still needs asking."""
     todo = {model["model_id"]: [] for model in models}
     skipped = 0
     failed_pairs = []
@@ -319,65 +139,11 @@ def build_worklist(master, answers, case_ids, models):
     return todo, skipped, failed_pairs, changed_pairs
 
 
-def confirm_run(master, answers, case_ids, models):
-    todo, skipped, failed_pairs, changed_pairs = build_worklist(
-        master, answers, case_ids, models
-    )
-    total_requested = len(case_ids) * len(models)
-    print("\nStep 3 of 3 - confirm.")
-    print(
-        "  {} case-model pairs requested; {} already answered (will skip).".format(
-            total_requested, skipped
-        )
-    )
-    if failed_pairs:
-        if prompt(
-            "  {} pair{} failed before. Retry {}? [Y/n]: ".format(
-                len(failed_pairs),
-                "" if len(failed_pairs) == 1 else "s",
-                "it" if len(failed_pairs) == 1 else "them",
-            )
-        ).strip().lower() in ("", "y", "yes"):
-            for case_id, model in failed_pairs:
-                todo[model["model_id"]].append(case_id)
-    if changed_pairs:
-        print(
-            "  {} answered pair{} where the case wording has changed since:".format(
-                len(changed_pairs), "" if len(changed_pairs) == 1 else "s"
-            )
-        )
-        for case_id, model in changed_pairs[:10]:
-            print("    {} x {}".format(case_id, model["display_name"]))
-        if prompt("  Ask these again (overwrites the old answers)? [y/N]: ").strip().lower() in (
-            "y",
-            "yes",
-        ):
-            for case_id, model in changed_pairs:
-                todo[model["model_id"]].append(case_id)
-
-    for model_id in todo:
-        todo[model_id] = sort_case_ids(set(todo[model_id]))
-
-    api_count = sum(len(todo[m["model_id"]]) for m in models if m["kind"] in ("api", "test"))
-    browser_models = [m for m in models if m["kind"] == "browser" and todo[m["model_id"]]]
-    browser_count = sum(len(todo[m["model_id"]]) for m in browser_models)
-    if api_count + browser_count == 0:
-        print("  Nothing to do - everything selected is already answered.")
-        return None
-    line = "  {} answer{} to collect: {} by API (unattended)".format(
-        api_count + browser_count, "" if api_count + browser_count == 1 else "s", api_count
-    )
-    if browser_models:
-        line += ", {} via {} (browser - please stay at the computer for that part)".format(
-            browser_count, ", ".join(m["display_name"] for m in browser_models)
-        )
-    print(line + ".")
-    if prompt("Start? [Y/n]: ").strip().lower() not in ("", "y", "yes"):
-        return None
-    return todo
+# ---------- running (UI-agnostic: works with any ui offering log/ask/tell) ----------
 
 
-# ---------- running: API + test models ----------
+class AbandonRun(Exception):
+    """The user pressed Stop."""
 
 
 def run_test_model(case):
@@ -390,20 +156,20 @@ def run_test_model(case):
     }
 
 
-def run_api_phase(master, answers, settings, models, todo):
+def run_api_phase(master, answers, settings, models, todo, ui):
     api_models = [m for m in models if m["kind"] in ("api", "test") and todo[m["model_id"]]]
     if not api_models:
         return
     total = sum(len(todo[m["model_id"]]) for m in api_models)
-    print("\nAPI models:")
+    ui.log("API models ({} answers to collect):".format(total))
     done = 0
     options = settings.data["options"]
     for model in api_models:
         for case_id in todo[model["model_id"]]:
+            if ui.stop_requested:
+                raise AbandonRun()
             done += 1
             case = master.cases[case_id]
-            label = "  [{:3d}/{}] {} x {} ".format(done, total, case_id, model["display_name"])
-            print(label.ljust(46, "."), end=" ", flush=True)
             record = new_record(
                 case, model, render_prompt(case),
                 deep_thinking=bool(settings.option("deep_thinking")),
@@ -418,40 +184,78 @@ def run_api_phase(master, answers, settings, models, todo):
                         settings.api_model(model["model_id"]),
                         record["prompt_sent"],
                         options,
+                        log=ui.log,
                     )
                 record.update(result)
                 record["status"] = "ok"
                 record["finished_at"] = now_iso()
                 answers.upsert(record)
-                print("ok ({:.1f}s)".format(time.monotonic() - started))
-            except ApiCallError as e:
-                record["error"] = str(e)
+                ui.log("  [{}/{}] {} x {} - ok ({:.1f}s)".format(
+                    done, total, case_id, model["display_name"],
+                    time.monotonic() - started,
+                ))
+            except ApiCallError as error:
+                record["error"] = str(error)
                 record["finished_at"] = now_iso()
                 answers.upsert(record)
-                print("FAILED - {}".format(e))
-            except ModelAbort as e:
-                print("stopped")
-                print("  {} is being skipped for the rest of this run: {}".format(
-                    model["display_name"], e
+                ui.log("  [{}/{}] {} x {} - FAILED: {}".format(
+                    done, total, case_id, model["display_name"], error
+                ))
+            except ModelAbort as error:
+                ui.log("  {} is being skipped for the rest of this run: {}".format(
+                    model["display_name"], error
                 ))
                 break
 
 
-# ---------- running: browser models ----------
+def interactive_login(driver, page, site_settings, ui):
+    try:
+        page.goto(driver.login_url, wait_until="domcontentloaded")
+    except Exception:
+        pass
+    driver.autofill_login(
+        page, site_settings.get("username", ""), site_settings.get("password", "")
+    )
+    while True:
+        choice = ui.ask_choice(
+            "Log in to {}".format(driver.display_name),
+            "A browser window is open on {}. Please finish logging in there,\n"
+            "including any verification code or \"I am not a robot\" check.\n"
+            "If the site offers \"remember this device\", say yes.\n\n"
+            "When you can see the normal question page, click Continue.".format(
+                driver.display_name
+            ),
+            [("check", "Continue - I am logged in"), ("stop", "Stop / skip this site")],
+        )
+        if choice != "check":
+            return False
+        try:
+            page.goto(driver.home_url, wait_until="domcontentloaded")
+        except Exception:
+            pass
+        if driver.is_logged_in(page):
+            site_settings["last_login_ok"] = now_iso()
+            return True
+        ui.log("  It doesn't look logged in yet - please finish in the browser window.")
 
 
-def manual_capture(driver, page, case, prompt_text, images_dir, basename):
+def manual_capture(driver, page, prompt_text, images_dir, basename, ui):
     if copy_to_clipboard(page, prompt_text):
-        print(
-            "  The case text is on your clipboard. In the browser window: paste "
-            "it (Ctrl+V / Cmd+V), send it, and wait for the full answer."
+        message = (
+            "The case text is on your clipboard.\n\nIn the browser window: paste "
+            "it (Ctrl+V), send it, and wait for the FULL answer to appear.\n\n"
+            "Then click OK here to capture it."
         )
     else:
-        print("  Copy the case text between the lines below into the site:")
-        print("-" * 60)
-        print(prompt_text)
-        print("-" * 60)
-    prompt("  When the answer is fully visible, press Enter here to capture it. ")
+        ui.log("Copy the case text between the lines below into the site:")
+        ui.log("-" * 50)
+        ui.log(prompt_text)
+        ui.log("-" * 50)
+        message = (
+            "The case text is printed in the log pane. Copy it into the browser, "
+            "send it, wait for the FULL answer, then click OK to capture it."
+        )
+    ui.tell("Your turn in the browser", message)
     return driver.extract_answer(page, images_dir, basename, manual=True)
 
 
@@ -468,69 +272,24 @@ def browser_ask_one(driver, page, case, prompt_text, images_dir, basename, optio
     return driver.extract_answer(page, images_dir, basename, baseline=baseline)
 
 
-def browser_recovery_menu(driver, site_name, case_id, error):
-    print(
-        "\n  Problem on {} with case {}: {}.".format(site_name, case_id, error.detail)
-    )
-    print("  The browser window is still open.")
-    print("    [R]etry automatically")
-    print("    [M] do it by hand (the program will capture the result)")
-    print("    [S]kip this case on {}".format(site_name))
-    print("    [A]bandon {} for this run (other models are unaffected)".format(site_name))
-    if error.step == "logged_out":
-        print("    [L] I have logged back in - continue")
-    while True:
-        choice = prompt("  > ").strip().lower()
-        if choice in ("r", "m", "s", "a") or (choice == "l" and error.step == "logged_out"):
-            return choice
-        print("  Please choose one of the letters above.")
-
-
-def interactive_login(driver, page, site_settings):
-    try:
-        page.goto(driver.login_url, wait_until="domcontentloaded")
-    except Exception:
-        pass
-    driver.autofill_login(
-        page, site_settings.get("username", ""), site_settings.get("password", "")
-    )
-    print(
-        "\n  A browser window is open on {}. Please finish logging in there,\n"
-        "  including any verification code or \"I am not a robot\" check.\n"
-        "  If the site offers \"remember this device\", say yes.".format(driver.display_name)
-    )
-    while True:
-        raw = prompt(
-            "  When you can see the normal question page, press Enter (or S to stop): "
-        ).strip().lower()
-        if raw == "s":
-            return False
-        try:
-            page.goto(driver.home_url, wait_until="domcontentloaded")
-        except Exception:
-            pass
-        if driver.is_logged_in(page):
-            site_settings["last_login_ok"] = now_iso()
-            return True
-        print("  It doesn't look logged in yet - please finish in the browser window.")
-
-
-def run_browser_site(master, answers, settings, model, case_ids):
+def run_browser_site(master, answers, settings, model, case_ids, ui):
     site_id = model["model_id"]
     options = settings.data["options"]
-    print(
-        "\n  Next: {} ({} case{}). A browser window will open; please stay at\n"
-        "  the computer in case the site asks you to log in or verify.".format(
-            model["display_name"], len(case_ids), "" if len(case_ids) == 1 else "s"
-        )
+    choice = ui.ask_choice(
+        "Next: {}".format(model["display_name"]),
+        "{} case{} will be asked on {}.\n\nA browser window will open; please "
+        "stay at the computer in case the site asks you to log in or "
+        "verify.".format(len(case_ids), "" if len(case_ids) == 1 else "s",
+                         model["display_name"]),
+        [
+            ("auto", "Start (automatic)"),
+            ("manual", "Start - I will drive every case by hand"),
+            ("skip", "Skip {} for now".format(model["display_name"])),
+        ],
     )
-    raw = prompt(
-        "  Press Enter to begin, M to answer every case by hand in the browser,\n"
-        "  or S to skip {} for now: ".format(model["display_name"])
-    ).strip().lower()
-    if raw == "s":
+    if choice in (None, "skip"):
         return
-    all_manual = raw == "m"
+    all_manual = choice == "manual"
 
     from playwright.sync_api import sync_playwright
 
@@ -541,25 +300,23 @@ def run_browser_site(master, answers, settings, model, case_ids):
             driver = make_driver(site_id)
             driver.start_new_question(page)
             if not driver.is_logged_in(page):
-                if not interactive_login(driver, page, settings.browser_model(site_id)):
-                    print("  Skipping {} (not logged in).".format(model["display_name"]))
+                if not interactive_login(driver, page, settings.browser_model(site_id), ui):
+                    ui.log("  Skipping {} (not logged in).".format(model["display_name"]))
                     return
                 settings.save()
 
             images_dir = answers.ensure_images_dir()
             for index, case_id in enumerate(case_ids, start=1):
+                if ui.stop_requested:
+                    raise AbandonRun()
                 case = master.cases[case_id]
                 prompt_text = render_prompt(case)
                 basename = answers.image_basename(case_id, site_id)
-                # Browser sites think as deeply as their web product allows;
-                # a fresh conversation per case is what we control (below).
                 record = new_record(case, model, prompt_text, deep_thinking=True)
                 started = time.monotonic()
-                print(
-                    "  [{:3d}/{}] {} x {}".format(
-                        index, len(case_ids), case_id, model["display_name"]
-                    )
-                )
+                ui.log("  [{}/{}] {} x {}...".format(
+                    index, len(case_ids), case_id, model["display_name"]
+                ))
                 answers.clear_images(case_id, site_id)
                 result = None
                 mode_manual = all_manual
@@ -567,28 +324,43 @@ def run_browser_site(master, answers, settings, model, case_ids):
                     try:
                         if mode_manual:
                             result = manual_capture(
-                                driver, page, case, prompt_text, images_dir, basename
+                                driver, page, prompt_text, images_dir, basename, ui
                             )
                         else:
                             result = browser_ask_one(
-                                driver, page, case, prompt_text, images_dir, basename, options
+                                driver, page, case, prompt_text, images_dir,
+                                basename, options,
                             )
                     except BrowserStepError as error:
-                        choice = browser_recovery_menu(
-                            driver, model["display_name"], case_id, error
+                        options_list = [
+                            ("retry", "Retry automatically"),
+                            ("manual", "I will do it by hand"),
+                            ("skip", "Skip this case"),
+                            ("abandon", "Set {} aside".format(model["display_name"])),
+                        ]
+                        if error.step == "logged_out":
+                            options_list.insert(0, ("retry", "I have logged back in - continue"))
+                            options_list = options_list[:1] + options_list[2:]
+                        answer = ui.ask_choice(
+                            "Problem on {} with case {}".format(
+                                model["display_name"], case_id
+                            ),
+                            "{}.\n\nThe browser window is still open.".format(error.detail),
+                            options_list,
                         )
-                        if choice == "r" or choice == "l":
+                        if answer == "retry":
                             continue
-                        if choice == "m":
+                        if answer == "manual":
                             mode_manual = True
                             continue
-                        if choice == "s":
+                        if answer in (None, "skip"):
                             record["error"] = "skipped: " + error.detail
                             record["finished_at"] = now_iso()
                             answers.upsert(record)
                             break
-                        if choice == "a":
-                            raise AbandonSite()
+                        if answer == "abandon":
+                            ui.log("  Set {} aside for this run.".format(model["display_name"]))
+                            return
                 if result is None:
                     continue
                 record["response_text"] = result.text
@@ -598,19 +370,15 @@ def run_browser_site(master, answers, settings, model, case_ids):
                 record["status"] = "ok_manual" if result.manual else "ok"
                 record["finished_at"] = now_iso()
                 answers.upsert(record)
-                print(
-                    "        ok{}, {} image{} ({:.0f}s)".format(
-                        " (by hand)" if result.manual else "",
-                        len(result.image_paths),
-                        "" if len(result.image_paths) == 1 else "s",
-                        time.monotonic() - started,
-                    )
-                )
+                ui.log("        ok{}, {} image{} ({:.0f}s)".format(
+                    " (by hand)" if result.manual else "",
+                    len(result.image_paths),
+                    "" if len(result.image_paths) == 1 else "s",
+                    time.monotonic() - started,
+                ))
                 if index < len(case_ids) and not mode_manual:
                     delay = options.get("browser_question_delay_s", 8)
                     time.sleep(delay * random.uniform(0.5, 1.5))
-        except AbandonSite:
-            print("  Stopped {} for this run.".format(model["display_name"]))
         finally:
             try:
                 context.close()
@@ -618,38 +386,20 @@ def run_browser_site(master, answers, settings, model, case_ids):
                 pass
 
 
-def run_browser_phase(master, answers, settings, models, todo):
-    browser_models = [m for m in models if m["kind"] == "browser" and todo[m["model_id"]]]
-    if not browser_models:
-        return
-    print("\nBrowser models:")
-    for model in browser_models:
-        run_browser_site(master, answers, settings, model, todo[model["model_id"]])
-
-
-def run_flow(master, answers, settings, case_sets):
-    case_ids = choose_cases(master, case_sets)
-    if not case_ids:
-        return
-    models = choose_models(settings, answers, case_ids)
-    if not models:
-        return
-    todo = confirm_run(master, answers, case_ids, models)
-    if todo is None:
-        return
+def run_everything(master, answers, settings, models, todo, ui):
     try:
-        run_api_phase(master, answers, settings, models, todo)
-        run_browser_phase(master, answers, settings, models, todo)
-    except KeyboardInterrupt:
-        print(
-            "\nStopped. Everything answered so far is saved in answers.json; "
-            "run again to continue where you left off."
-        )
-        return
-    summarize_run(answers, case_ids, models)
+        run_api_phase(master, answers, settings, models, todo, ui)
+        browser_models = [m for m in models if m["kind"] == "browser" and todo[m["model_id"]]]
+        for model in browser_models:
+            if ui.stop_requested:
+                raise AbandonRun()
+            run_browser_site(master, answers, settings, model, todo[model["model_id"]], ui)
+    except AbandonRun:
+        ui.log("Stopped. Everything answered so far is saved; run again to continue.")
+    summarize_run(answers, sorted({c for ids in todo.values() for c in ids}), models, ui)
 
 
-def summarize_run(answers, case_ids, models):
+def summarize_run(answers, case_ids, models, ui):
     ok = manual = failed = missing = 0
     failures = []
     for model in models:
@@ -663,467 +413,838 @@ def summarize_run(answers, case_ids, models):
                 manual += 1
             else:
                 failed += 1
-                failures.append(
-                    "{} x {}: {}".format(case_id, model["display_name"], record.get("error"))
-                )
-    line = "\nDone. {} ok".format(ok)
+                failures.append("{} x {}: {}".format(
+                    case_id, model["display_name"], record.get("error")
+                ))
+    line = "Done. {} ok".format(ok)
     if manual:
         line += ", {} ok (by hand)".format(manual)
     if failed:
         line += ", {} failed".format(failed)
     if missing:
         line += ", {} not attempted".format(missing)
-    print(line + ".")
+    ui.log(line + ".")
     for failure in failures[:10]:
-        print("  " + failure)
-    print(
-        "Everything is saved after each answer - you can re-run anytime; "
-        "finished pairs are skipped automatically."
-    )
-
-
-# ---------- case sets menu ----------
-
-
-def case_sets_menu(master, case_sets):
-    while True:
-        names = sorted(case_sets.sets, key=str.lower)
-        print("\nSaved case sets ({}):".format(len(names)))
-        for name in names:
-            entry = case_sets.sets[name]
-            print(
-                "  {}  ({} cases; {})".format(
-                    name, len(entry["case_ids"]), entry["expression"] or "chosen by hand"
-                )
-            )
-        choice = prompt(
-            "[N]ew set  [V]iew  [R]ename  [D]elete  or press Enter to go back: "
-        ).strip().lower()
-        if not choice:
-            return
-        try:
-            if choice == "n":
-                selected = choose_cases(master, case_sets, header="Choose the cases for the new set.")
-                if selected is None:
-                    continue
-                # choose_cases already offered to save ad-hoc entries; only
-                # ask again if it wasn't saved there.
-                if not any(case_sets.sets[n]["case_ids"] == selected for n in case_sets.sets):
-                    name = prompt("Name for this set: ").strip()
-                    if name:
-                        case_sets.add(name, "chosen by hand", selected)
-                        print("Saved case set '{}'.".format(name))
-            elif choice in ("v", "r", "d"):
-                name = prompt("Which set name? ").strip()
-                stored = case_sets.find(name)
-                if stored is None:
-                    print("No case set named '{}'.".format(name))
-                    continue
-                if choice == "v":
-                    entry = case_sets.sets[stored]
-                    present, missing = case_sets.resolve(stored, master.cases)
-                    print("Set '{}' - {}".format(stored, entry["expression"]))
-                    print("  Cases: {}".format(describe_selection(entry["case_ids"], limit=30)))
-                    if missing:
-                        print("  No longer in the master: {}".format(", ".join(missing)))
-                elif choice == "r":
-                    new_name = prompt("New name: ").strip()
-                    if new_name:
-                        case_sets.rename(stored, new_name)
-                        print("Renamed to '{}'.".format(new_name))
-                else:
-                    if prompt(
-                        "Really delete set '{}'? Type yes to confirm: ".format(stored)
-                    ).strip().lower() == "yes":
-                        case_sets.delete(stored)
-                        print("Deleted.")
-            else:
-                print("Please choose N, V, R, or D.")
-        except CaseStoreError as e:
-            print("Error: {}".format(e))
-
-
-# ---------- answers menu ----------
-
-
-def answers_menu(master, answers, settings):
-    if not answers.answers:
-        print("\nNo answers have been collected yet.\n")
-        return
-    catalog = {m["model_id"]: m for m in model_catalog(settings)}
-    model_ids = answers.model_ids()
-    providers = sorted({split_case_id(c)[0] for c, _ in answers.answers})
-    print("\nAnswers collected so far (ok / failed):")
-    header = "  {:22s}".format("")
-    for provider in providers:
-        header += "  provider {:>4}".format(provider)
-    print(header)
-    for model_id in model_ids:
-        display = catalog.get(model_id, {}).get("display_name", model_id)
-        row = "  {:22s}".format(display[:22])
-        for provider in providers:
-            ok = failed = 0
-            for (case_id, mid), record in answers.answers.items():
-                if mid != model_id or split_case_id(case_id)[0] != provider:
-                    continue
-                if record["status"] in OK_STATUSES:
-                    ok += 1
-                else:
-                    failed += 1
-            row += "  {:>8}".format("{} / {}".format(ok, failed))
-        print(row)
-
-    failures = [
-        (case_id, mid, record)
-        for (case_id, mid), record in sorted(answers.answers.items())
-        if record["status"] not in OK_STATUSES
-    ]
-    while True:
-        choice = prompt(
-            "\n[V]iew one answer  [F] list failed pairs  or press Enter to go back: "
-        ).strip().lower()
-        if not choice:
-            return
-        if choice == "f":
-            if not failures:
-                print("No failed pairs.")
-            for case_id, mid, record in failures:
-                print("  {} x {}: {}".format(case_id, mid, record.get("error")))
-        elif choice == "v":
-            case_id = prompt("Case ID (e.g. 003-001): ").strip()
-            mid = prompt(
-                "Model ({}): ".format(", ".join(model_ids))
-            ).strip().lower()
-            record = answers.get(case_id, mid)
-            if record is None:
-                print("No answer stored for {} x {}.".format(case_id, mid))
-                continue
-            print("\n{} x {}  [{}]  asked {}".format(
-                case_id, record.get("model_display_name", mid), record["status"],
-                record.get("started_at"),
-            ))
-            print("Model: {}".format(record.get("model_reported") or record.get("model_requested")))
-            print("-" * 60)
-            print(record.get("response_text") or "(no text; error: {})".format(record.get("error")))
-            print("-" * 60)
-            if record.get("images"):
-                print("Images: {}".format(", ".join(record["images"])))
-        else:
-            print("Please choose V or F.")
-
-
-# ---------- settings menu ----------
+        ui.log("  " + failure)
+    ui.log("Everything is saved after each answer; finished pairs are skipped next time.")
+# ---------- window interface ----------
 
 
 def masked(secret):
     secret = (secret or "").strip()
-    if not secret:
-        return "not set"
-    return "..." + secret[-4:]
+    return "not set" if not secret else "..." + secret[-4:]
 
 
-def enter_secret(label):
-    try:
-        value = getpass.getpass("{} (typing is hidden; blank to keep current): ".format(label))
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return None
-    return value.strip() or None
+class RunnerApp:
+    def __init__(self, root, master, answers, settings, case_sets, gui):
+        self.root = root
+        self.master = master
+        self.answers = answers
+        self.settings = settings
+        self.case_sets = case_sets
+        self.gui = gui
+        self.selected_cases = []
+        self.model_vars = {}
+        self.current_ui = None
+        import gui_common
 
+        self.gc = gui_common
+        tk = gui.tk
+        self.notebook = gui.ttk.Notebook(root)
+        self.notebook.pack(fill="both", expand=True, padx=8, pady=8)
+        self.run_tab = tk.Frame(self.notebook)
+        self.sets_tab = tk.Frame(self.notebook)
+        self.answers_tab = tk.Frame(self.notebook)
+        self.settings_tab = tk.Frame(self.notebook)
+        self.notebook.add(self.run_tab, text="  Run  ")
+        self.notebook.add(self.sets_tab, text="  Case sets  ")
+        self.notebook.add(self.answers_tab, text="  Answers so far  ")
+        self.notebook.add(self.settings_tab, text="  Settings  ")
+        self._build_run_tab()
+        self._build_sets_tab()
+        self._build_answers_tab()
+        self._build_settings_tab()
+        self.task = gui_common.BackgroundTask(root, self.run_log.log)
+        self.settings_task = gui_common.BackgroundTask(root, self.settings_log.log)
+        self.refresh_all()
+        root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-def test_api_connection(model_id, settings):
-    entry = settings.api_model(model_id)
-    print("Contacting {}...".format(API_REGISTRY[model_id]["display_name"]))
-    options = dict(settings.data["options"])
-    options["max_retries"] = 1
-    try:
-        result = call_api_model(
-            model_id, entry, "Reply with the single word OK.", options
-        )
-        print(
-            "Success. The service answered and reported model '{}'.".format(
-                result["model_reported"]
+    # ---------------- Run tab ----------------
+
+    def _build_run_tab(self):
+        tk = self.gui.tk
+        frame = self.run_tab
+        self.master_label = tk.Label(frame, text="", anchor="w")
+        self.master_label.pack(fill="x", pady=(6, 0))
+
+        picker = tk.LabelFrame(frame, text="1. Which cases?")
+        picker.pack(fill="x", pady=6)
+        self.case_mode = tk.StringVar(value="all")
+        row1 = tk.Frame(picker)
+        row1.pack(fill="x", padx=6, pady=2)
+        tk.Radiobutton(row1, text="All cases", variable=self.case_mode, value="all",
+                       command=self.resolve_cases).pack(side="left")
+        row2 = tk.Frame(picker)
+        row2.pack(fill="x", padx=6, pady=2)
+        tk.Radiobutton(row2, text="These cases:", variable=self.case_mode, value="expr",
+                       command=self.resolve_cases).pack(side="left")
+        self.case_expression = tk.Entry(row2, width=44)
+        self.case_expression.pack(side="left", padx=4)
+        tk.Label(row2, text="(e.g. 003-001..003-020, 005-004, provider 7)").pack(side="left")
+        row3 = tk.Frame(picker)
+        row3.pack(fill="x", padx=6, pady=2)
+        tk.Radiobutton(row3, text="Saved case set:", variable=self.case_mode, value="set",
+                       command=self.resolve_cases).pack(side="left")
+        self.set_choice = self.gui.ttk.Combobox(row3, width=30, state="readonly")
+        self.set_choice.pack(side="left", padx=4)
+        self.set_choice.bind("<<ComboboxSelected>>", lambda e: self.resolve_cases())
+        row4 = tk.Frame(picker)
+        row4.pack(fill="x", padx=6, pady=(2, 6))
+        tk.Button(row4, text="Check selection", command=self.resolve_cases).pack(side="left")
+        tk.Button(row4, text="Save selection as a named set",
+                  command=self.save_selection_as_set).pack(side="left", padx=6)
+        self.selection_label = tk.Label(row4, text="", anchor="w")
+        self.selection_label.pack(side="left", fill="x", expand=True, padx=6)
+
+        models_frame = tk.LabelFrame(frame, text="2. Which LLMs?")
+        models_frame.pack(fill="x", pady=6)
+        self.models_holder = tk.Frame(models_frame)
+        self.models_holder.pack(fill="x", padx=6, pady=4)
+
+        options_row = tk.Frame(frame)
+        options_row.pack(fill="x", pady=(0, 4))
+        self.retry_failed = tk.BooleanVar(value=True)
+        self.reask_changed = tk.BooleanVar(value=False)
+        tk.Checkbutton(options_row, text="Retry pairs that failed before",
+                       variable=self.retry_failed).pack(side="left")
+        tk.Checkbutton(options_row, text="Re-ask answers whose case wording changed",
+                       variable=self.reask_changed).pack(side="left", padx=10)
+        self.start_button = tk.Button(options_row, text="3. Start the run",
+                                      command=self.start_run)
+        self.start_button.pack(side="right")
+        self.stop_button = tk.Button(options_row, text="Stop after the current answer",
+                                     command=self.stop_run, state="disabled")
+        self.stop_button.pack(side="right", padx=6)
+
+        self.run_log = self.gc.LogBox(frame, height=14).pack(fill="both", expand=True, pady=4)
+
+    def refresh_all(self):
+        self.refresh_master_label()
+        self.refresh_set_choices()
+        self.refresh_model_checkboxes()
+        self.resolve_cases()
+        self.refresh_sets_tab()
+        self.refresh_answers_tab()
+        self.refresh_settings_rows()
+
+    def refresh_master_label(self):
+        if self.master is None:
+            self.master_label.configure(
+                text="No master case database (master_cases.json) was found in this "
+                "folder - run the Case Merger first. Settings still work."
             )
-        )
-    except (ApiCallError, ModelAbort) as e:
-        print("Test failed: {}".format(e))
-
-
-def api_model_settings(model_id, settings):
-    registry = API_REGISTRY[model_id]
-    while True:
-        entry = settings.api_model(model_id)
-        print("\n{} settings:".format(registry["display_name"]))
-        print("  Key: {}   Model: {}".format(
-            masked(entry.get("api_key")),
-            entry.get("model") or "(default: {})".format(registry["default_model"]),
-        ))
-        choice = prompt(
-            "[K]ey  [M]odel name  [T]est connection  or press Enter to go back: "
-        ).strip().lower()
-        if not choice:
-            return
-        if choice == "k":
-            value = enter_secret("API key for {}".format(registry["display_name"]))
-            if value is not None:
-                entry["api_key"] = value
-                settings.save()
-                print("Key saved.")
-        elif choice == "m":
-            value = prompt(
-                "Model name (blank = default '{}'): ".format(registry["default_model"])
-            ).strip()
-            entry["model"] = value
-            settings.save()
-            print("Model set to {}.".format(value or "the default"))
-        elif choice == "t":
-            test_api_connection(model_id, settings)
+            self.start_button.configure(state="disabled")
         else:
-            print("Please choose K, M, or T.")
+            providers = {c["provider_number"] for c in self.master.cases.values()}
+            self.master_label.configure(
+                text="Master database: {} cases from {} provider{}.  Answers so far: {}.".format(
+                    len(self.master.cases), len(providers),
+                    "" if len(providers) == 1 else "s", len(self.answers.answers),
+                )
+            )
 
+    def refresh_set_choices(self):
+        names = sorted(self.case_sets.sets, key=str.lower)
+        self.set_choice.configure(values=names)
 
-def browser_login_now(site_id, settings):
-    if not llm_browser.PLAYWRIGHT_AVAILABLE:
-        print("Browser automation is not set up yet - use 'Browser automation setup' first.")
-        return
-    from playwright.sync_api import sync_playwright
+    def refresh_model_checkboxes(self):
+        # Keep whatever is already ticked - refreshing the status text must
+        # never silently clear the user's model selection.
+        previous = {m: var.get() for m, (var, _model) in self.model_vars.items()}
+        for child in self.models_holder.winfo_children():
+            child.destroy()
+        self.model_vars = {}
+        tk = self.gui.tk
+        for model in model_catalog(self.settings):
+            var = tk.BooleanVar(value=previous.get(model["model_id"], False))
+            self.model_vars[model["model_id"]] = (var, model)
+            status = self.model_status(model)
+            tk.Checkbutton(
+                self.models_holder,
+                text="{}   ({})".format(model["display_name"], status),
+                variable=var, anchor="w",
+            ).pack(fill="x")
 
-    driver = make_driver(site_id)
-    with sync_playwright() as playwright:
-        context = open_site_context(playwright, site_id)
-        try:
-            page = context.pages[0] if context.pages else context.new_page()
-            if interactive_login(driver, page, settings.browser_model(site_id)):
-                settings.save()
-                print("Logged in to {}. The login is remembered for future runs.".format(
-                    driver.display_name
+    def model_status(self, model):
+        if model["kind"] == "api":
+            key = self.settings.api_model(model["model_id"]).get("api_key", "")
+            status = "API, key set" if key.strip() else "API, NO KEY - set it in Settings"
+        elif model["kind"] == "browser":
+            if not llm_browser.PLAYWRIGHT_AVAILABLE:
+                status = "browser, needs one-time setup in Settings"
+            else:
+                last = self.settings.browser_model(model["model_id"]).get("last_login_ok")
+                status = "browser, login OK {}".format(last[:10]) if last else "browser, never logged in"
+        else:
+            status = "fake test model"
+        if self.selected_cases:
+            answered = sum(
+                1 for c in self.selected_cases
+                if (self.answers.get(c, model["model_id"]) or {}).get("status") in OK_STATUSES
+            )
+            status += "; answered {}/{}".format(answered, len(self.selected_cases))
+        return status
+
+    def resolve_cases(self):
+        if self.master is None:
+            return
+        mode = self.case_mode.get()
+        warnings = []
+        if mode == "all":
+            selected = sort_case_ids(self.master.cases)
+        elif mode == "set":
+            name = self.set_choice.get()
+            if not name:
+                self.selection_label.configure(text="Pick a saved set from the list.")
+                self.selected_cases = []
+                return
+            selected, missing = self.case_sets.resolve(name, self.master.cases)
+            if missing:
+                warnings.append("{} case(s) in the set are no longer in the master".format(
+                    len(missing)
                 ))
-        finally:
+        else:
+            expression = self.case_expression.get().strip()
+            if not expression:
+                self.selection_label.configure(text="Type the cases first.")
+                self.selected_cases = []
+                return
             try:
-                context.close()
-            except Exception:
-                pass
+                selected, notes = parse_selection(expression, self.master.cases)
+            except SelectionError as error:
+                self.selection_label.configure(text=str(error))
+                self.selected_cases = []
+                return
+            warnings.extend(notes)
+        self.selected_cases = selected
+        text = "{} case{} selected.".format(len(selected), "" if len(selected) == 1 else "s")
+        if warnings:
+            text += "  (" + "; ".join(warnings) + ")"
+        self.selection_label.configure(text=text)
+        self.refresh_model_checkboxes()
 
-
-def browser_site_settings(site_id, settings):
-    display = SITE_INFO[site_id]["display_name"]
-    while True:
-        entry = settings.browser_model(site_id)
-        print("\n{} settings:".format(display))
-        print("  Username: {}   Password: {}   Last login OK: {}".format(
-            entry.get("username") or "not set",
-            "stored" if entry.get("password") else "not stored",
-            (entry.get("last_login_ok") or "never")[:10],
-        ))
-        choice = prompt(
-            "[U]sername  [P]assword  [L]og in now  or press Enter to go back: "
-        ).strip().lower()
-        if not choice:
+    def save_selection_as_set(self):
+        self.resolve_cases()
+        if not self.selected_cases:
             return
-        if choice == "u":
-            value = prompt("Username / email for {}: ".format(display)).strip()
-            entry["username"] = value
-            settings.save()
-        elif choice == "p":
-            print(
-                "Leaving the password blank and typing it in the browser window "
-                "yourself is recommended."
-            )
-            value = enter_secret("Password for {}".format(display))
-            if value is not None:
-                entry["password"] = value
-                settings.save()
-                print("Password saved.")
-        elif choice == "l":
-            browser_login_now(site_id, settings)
-        else:
-            print("Please choose U, P, or L.")
-
-
-def playwright_setup():
-    if llm_browser.PLAYWRIGHT_AVAILABLE:
-        print("Browser automation (Playwright) is already installed.")
-        return
-    print(
-        "\nThe browser models need one extra piece of software (Playwright) and\n"
-        "a browser for it to drive. This is a one-time download of a few hundred MB."
-    )
-    if prompt("Install it now? [y/N]: ").strip().lower() not in ("y", "yes"):
-        return
-    for args, label in (
-        ([sys.executable, "-m", "pip", "install", "playwright"], "Installing Playwright"),
-        ([sys.executable, "-m", "playwright", "install", "chromium"], "Downloading the browser"),
-    ):
-        print("{}...".format(label))
-        try:
-            completed = subprocess.run(args)
-        except OSError as e:
-            print("Could not run the installer: {}".format(e))
+        name = self.gc.ask_string(self.root, "Save case set", "Name for this set:")
+        if not name:
             return
-        if completed.returncode != 0:
-            print(
-                "That step did not finish successfully. Please try again, or ask "
-                "for help with the message above."
-            )
-            return
-    print(
-        "Done. Please close this program and start it again so the browser "
-        "models become available."
-    )
-
-
-def options_menu(settings):
-    labels = [
-        ("request_timeout_s", "Seconds to wait for an API answer"),
-        ("max_retries", "How many times to retry a busy API"),
-        ("browser_question_delay_s", "Pause between browser questions (seconds)"),
-        ("answer_stable_seconds", "Seconds a browser answer must hold still to count as finished"),
-        ("answer_max_wait_seconds", "Longest wait for one browser answer (seconds)"),
-    ]
-    while True:
-        print("\nOptions:")
-        for i, (key, label) in enumerate(labels, start=1):
-            print("  {}. {}: {}".format(i, label, settings.option(key)))
-        print("  {}. Deep thinking (models reason at length before answering): {}".format(
-            len(labels) + 1, "ON" if settings.option("deep_thinking") else "off"
-        ))
-        print("  {}. Fake test model for trying things out: {}".format(
-            len(labels) + 2, "ON" if settings.option("enable_test_model") else "off"
-        ))
-        raw = prompt("Enter a number to change it, or press Enter to go back: ").strip()
-        if not raw:
-            return
-        if raw == str(len(labels) + 1):
-            settings.data["options"]["deep_thinking"] = not settings.option("deep_thinking")
-            settings.save()
-            continue
-        if raw == str(len(labels) + 2):
-            settings.data["options"]["enable_test_model"] = not settings.option("enable_test_model")
-            settings.save()
-            continue
-        if not raw.isdigit() or not 1 <= int(raw) <= len(labels):
-            continue
-        key, label = labels[int(raw) - 1]
-        value = prompt("{} (currently {}): ".format(label, settings.option(key))).strip()
-        if value.isdigit() and int(value) > 0:
-            settings.data["options"][key] = int(value)
-            settings.save()
-        else:
-            print("Please enter a positive whole number.")
-
-
-def settings_menu(settings):
-    while True:
-        print(
-            "\nSettings (stored in settings.json in this folder - keep that file private):"
+        expression = (
+            self.case_expression.get().strip()
+            if self.case_mode.get() == "expr" else "chosen in the window"
         )
-        for i, model_id in enumerate(API_MODEL_IDS, start=1):
-            entry = settings.api_model(model_id)
-            print("  {}. {:18s} key: {:10s} model: {}".format(
-                i,
-                API_REGISTRY[model_id]["display_name"],
-                masked(entry.get("api_key")),
-                entry.get("model") or "(default)",
-            ))
-        base = len(API_MODEL_IDS)
-        for j, site_id in enumerate(BROWSER_MODEL_IDS, start=1):
-            entry = settings.browser_model(site_id)
-            print("  {}. {:18s} username: {:20s} login: {}".format(
-                base + j,
-                SITE_INFO[site_id]["display_name"],
-                (entry.get("username") or "not set")[:20],
-                "verified " + entry["last_login_ok"][:10] if entry.get("last_login_ok") else "never",
-            ))
-        setup_item = base + len(BROWSER_MODEL_IDS) + 1
-        options_item = setup_item + 1
-        print("  {}. Browser automation setup (Playwright: {})".format(
-            setup_item, "installed" if llm_browser.PLAYWRIGHT_AVAILABLE else "NOT INSTALLED"
-        ))
-        print("  {}. Options (timeouts, retries, browser pacing, test model)".format(options_item))
-        raw = prompt("Enter a number, or press Enter to go back: ").strip()
-        if not raw:
+        try:
+            self.case_sets.add(name, expression, self.selected_cases)
+        except CaseStoreError as error:
+            self.gui.messagebox.showerror("Not saved", str(error), parent=self.root)
             return
-        if not raw.isdigit():
-            continue
-        number = int(raw)
-        if 1 <= number <= base:
-            api_model_settings(API_MODEL_IDS[number - 1], settings)
-        elif base < number <= base + len(BROWSER_MODEL_IDS):
-            browser_site_settings(BROWSER_MODEL_IDS[number - base - 1], settings)
-        elif number == setup_item:
-            playwright_setup()
-        elif number == options_item:
-            options_menu(settings)
+        self.refresh_set_choices()
+        self.refresh_sets_tab()
+        self.run_log.log("Saved case set '{}' ({} cases).".format(name, len(self.selected_cases)))
+
+    def chosen_models(self):
+        chosen = []
+        for model_id, (var, model) in self.model_vars.items():
+            if not var.get():
+                continue
+            if model["kind"] == "api" and not self.settings.api_model(model_id).get(
+                "api_key", ""
+            ).strip():
+                self.run_log.log(
+                    "Skipping {}: no API key (see Settings).".format(model["display_name"])
+                )
+            elif model["kind"] == "browser" and not llm_browser.PLAYWRIGHT_AVAILABLE:
+                self.run_log.log(
+                    "Skipping {}: browser automation is not set up yet (see "
+                    "Settings).".format(model["display_name"])
+                )
+            else:
+                chosen.append(model)
+        return chosen
+
+    def start_run(self):
+        if self.task.running or self.settings_task.running:
+            self.gui.messagebox.showinfo(
+                "Already busy", "Please wait for the current job to finish.",
+                parent=self.root,
+            )
+            return
+        self.resolve_cases()
+        if not self.selected_cases:
+            self.gui.messagebox.showinfo(
+                "No cases", "Choose the cases first (step 1).", parent=self.root
+            )
+            return
+        models = self.chosen_models()
+        if not models:
+            self.gui.messagebox.showinfo(
+                "No LLMs", "Tick at least one ready LLM (step 2).", parent=self.root
+            )
+            return
+        todo, skipped, failed_pairs, changed_pairs = build_worklist(
+            self.master, self.answers, self.selected_cases, models
+        )
+        if failed_pairs and self.retry_failed.get():
+            for case_id, model in failed_pairs:
+                todo[model["model_id"]].append(case_id)
+        if changed_pairs and self.reask_changed.get():
+            for case_id, model in changed_pairs:
+                todo[model["model_id"]].append(case_id)
+        for model_id in todo:
+            todo[model_id] = sort_case_ids(set(todo[model_id]))
+        api_count = sum(len(todo[m["model_id"]]) for m in models if m["kind"] in ("api", "test"))
+        browser_models = [m for m in models if m["kind"] == "browser" and todo[m["model_id"]]]
+        browser_count = sum(len(todo[m["model_id"]]) for m in browser_models)
+        if api_count + browser_count == 0:
+            self.gui.messagebox.showinfo(
+                "Nothing to do",
+                "Everything selected is already answered ({} pairs skipped).".format(skipped),
+                parent=self.root,
+            )
+            return
+        message = "{} answers to collect:\n- {} by API (unattended)".format(
+            api_count + browser_count, api_count
+        )
+        if browser_models:
+            message += "\n- {} in the browser via {} (please stay at the computer)".format(
+                browser_count, ", ".join(m["display_name"] for m in browser_models)
+            )
+        if skipped:
+            message += "\n\n{} already-answered pairs will be skipped.".format(skipped)
+        if changed_pairs and not self.reask_changed.get():
+            message += "\n\nNote: {} answered pair(s) have changed case wording (not re-asked).".format(
+                len(changed_pairs)
+            )
+        if not self.gui.messagebox.askyesno("Start the run?", message, parent=self.root):
+            return
+        self.start_button.configure(state="disabled")
+        self.stop_button.configure(state="normal")
+        self.run_log.log("=" * 50)
+
+        def work(ui):
+            run_everything(self.master, self.answers, self.settings, models, todo, ui)
+
+        def done(_result, error):
+            self.start_button.configure(state="normal")
+            self.stop_button.configure(state="disabled")
+            if error is not None:
+                self.run_log.log("The run stopped with a problem: {}".format(error))
+            self.refresh_answers_tab()
+            self.refresh_model_checkboxes()
+            self.refresh_master_label()
+
+        self.current_ui = self.task.start(work, on_done=done)
+
+    def stop_run(self):
+        if self.current_ui is not None:
+            self.current_ui.stop_requested = True
+            self.run_log.log("Stopping after the current answer...")
+
+    # ---------------- Case sets tab ----------------
+
+    def _build_sets_tab(self):
+        tk = self.gui.tk
+        frame = self.sets_tab
+        tk.Label(
+            frame, text="Saved case selections. Save one on the Run tab, then reuse "
+            "it anytime (for example to run the same cases on a new LLM).",
+            anchor="w", justify="left",
+        ).pack(fill="x", pady=(6, 4))
+        body = tk.Frame(frame)
+        body.pack(fill="both", expand=True)
+        self.sets_list = tk.Listbox(body, width=34, exportselection=False)
+        self.sets_list.pack(side="left", fill="y", pady=4)
+        self.sets_list.bind("<<ListboxSelect>>", lambda e: self.show_set_details())
+        self.set_details = tk.Label(body, text="", anchor="nw", justify="left")
+        self.set_details.pack(side="left", fill="both", expand=True, padx=10, pady=4)
+        row = tk.Frame(frame)
+        row.pack(fill="x", pady=4)
+        tk.Button(row, text="Rename", command=self.rename_set).pack(side="left")
+        tk.Button(row, text="Delete", command=self.delete_set).pack(side="left", padx=6)
+
+    def refresh_sets_tab(self):
+        self.sets_list.delete(0, "end")
+        for name in sorted(self.case_sets.sets, key=str.lower):
+            entry = self.case_sets.sets[name]
+            self.sets_list.insert("end", "{}  ({} cases)".format(name, len(entry["case_ids"])))
+        self.set_details.configure(text="")
+
+    def selected_set_name(self):
+        selection = self.sets_list.curselection()
+        if not selection:
+            return None
+        return sorted(self.case_sets.sets, key=str.lower)[selection[0]]
+
+    def show_set_details(self):
+        name = self.selected_set_name()
+        if name is None:
+            return
+        entry = self.case_sets.sets[name]
+        lines = ["Set '{}'".format(name), "Defined as: {}".format(entry["expression"]),
+                 "Cases ({}):".format(len(entry["case_ids"]))]
+        ids = entry["case_ids"]
+        for i in range(0, len(ids), 8):
+            lines.append("  " + ", ".join(ids[i:i + 8]))
+        if self.master is not None:
+            _present, missing = self.case_sets.resolve(name, self.master.cases)
+            if missing:
+                lines.append("No longer in the master: " + ", ".join(missing))
+        self.set_details.configure(text="\n".join(lines[:30]))
+
+    def rename_set(self):
+        name = self.selected_set_name()
+        if name is None:
+            return
+        new_name = self.gc.ask_string(self.root, "Rename set", "New name for '{}':".format(name))
+        if not new_name:
+            return
+        try:
+            self.case_sets.rename(name, new_name)
+        except CaseStoreError as error:
+            self.gui.messagebox.showerror("Not renamed", str(error), parent=self.root)
+            return
+        self.refresh_sets_tab()
+        self.refresh_set_choices()
+
+    def delete_set(self):
+        name = self.selected_set_name()
+        if name is None:
+            return
+        if self.gui.messagebox.askyesno(
+            "Delete set", "Really delete the case set '{}'?".format(name), parent=self.root
+        ):
+            self.case_sets.delete(name)
+            self.refresh_sets_tab()
+            self.refresh_set_choices()
+
+    # ---------------- Answers tab ----------------
+
+    def _build_answers_tab(self):
+        tk = self.gui.tk
+        frame = self.answers_tab
+        row = tk.Frame(frame)
+        row.pack(fill="x", pady=(6, 0))
+        tk.Button(row, text="Refresh", command=self.refresh_answers_tab).pack(side="left")
+        tk.Button(row, text="View the selected answer", command=self.view_answer).pack(
+            side="left", padx=6
+        )
+        self.answers_tree = self.gc.make_table(
+            frame,
+            [("case", "Case"), ("model", "LLM"), ("status", "Status"),
+             ("images", "Images"), ("when", "Asked"), ("error", "Problem")],
+            widths={"case": 80, "model": 150, "status": 90, "images": 60,
+                    "when": 130, "error": 320},
+        )
+        self.answers_tree.master.pack(fill="both", expand=True, pady=6)
+
+    def refresh_answers_tab(self):
+        names = {m["model_id"]: m["display_name"] for m in model_catalog(self.settings)}
+        tree = self.answers_tree
+        for item in tree.get_children():
+            tree.delete(item)
+        ordered = sorted(
+            self.answers.answers.items(),
+            key=lambda kv: (split_case_id(kv[0][0]), kv[0][1]),
+        )
+        for (case_id, model_id), record in ordered:
+            tree.insert("", "end", iid="{}|{}".format(case_id, model_id), values=(
+                case_id,
+                names.get(model_id, model_id),
+                record.get("status"),
+                len(record.get("images", [])),
+                (record.get("started_at") or "")[:16].replace("T", " "),
+                (record.get("error") or "")[:80],
+            ))
+
+    def view_answer(self):
+        selection = self.answers_tree.selection()
+        if not selection:
+            self.gui.messagebox.showinfo(
+                "Nothing selected", "Click an answer in the table first.", parent=self.root
+            )
+            return
+        case_id, model_id = selection[0].split("|", 1)
+        record = self.answers.get(case_id, model_id)
+        if record is None:
+            return
+        tk = self.gui.tk
+        window = tk.Toplevel(self.root)
+        window.title("{} x {}".format(case_id, record.get("model_display_name", model_id)))
+        window.geometry("760x560")
+        info = "Status: {}   Model: {}   Asked: {}".format(
+            record.get("status"),
+            record.get("model_reported") or record.get("model_requested"),
+            record.get("started_at"),
+        )
+        tk.Label(window, text=info, anchor="w").pack(fill="x", padx=8, pady=(8, 0))
+        text = self.gc.readonly_text(window, height=24)
+        text.pack(fill="both", expand=True, padx=8, pady=8)
+        body = record.get("response_text") or "(no text; error: {})".format(record.get("error"))
+        if record.get("images"):
+            body += "\n\nImages:\n" + "\n".join(record["images"])
+        self.gc.set_text(text, body)
+
+    # ---------------- Settings tab ----------------
+
+    def _build_settings_tab(self):
+        tk = self.gui.tk
+        frame = self.settings_tab
+        tk.Label(
+            frame,
+            text="Keys and passwords are stored in settings.json in this folder - "
+            "keep that file private.",
+            anchor="w",
+        ).pack(fill="x", pady=(6, 2))
+        self.settings_rows = tk.Frame(frame)
+        self.settings_rows.pack(fill="x")
+        self.settings_log = self.gc.LogBox(frame, height=8).pack(
+            fill="both", expand=True, pady=6
+        )
+
+    def refresh_settings_rows(self):
+        for child in self.settings_rows.winfo_children():
+            child.destroy()
+        tk = self.gui.tk
+        holder = self.settings_rows
+        row_index = 0
+        tk.Label(holder, text="API models:", font=("TkDefaultFont", 9, "bold")).grid(
+            row=row_index, column=0, sticky="w", pady=(4, 0)
+        )
+        row_index += 1
+        for model_id in API_MODEL_IDS:
+            entry = self.settings.api_model(model_id)
+            registry = API_REGISTRY[model_id]
+            tk.Label(holder, text=registry["display_name"], width=18, anchor="w").grid(
+                row=row_index, column=0, sticky="w"
+            )
+            tk.Label(holder, text="key: " + masked(entry.get("api_key")), width=14,
+                     anchor="w").grid(row=row_index, column=1, sticky="w")
+            tk.Button(
+                holder, text="Set key",
+                command=lambda m=model_id: self.set_api_key(m),
+            ).grid(row=row_index, column=2, padx=2)
+            tk.Label(
+                holder,
+                text="model: " + (entry.get("model") or "(default: {})".format(
+                    registry["default_model"]
+                )),
+                anchor="w", width=30,
+            ).grid(row=row_index, column=3, sticky="w")
+            tk.Button(
+                holder, text="Change model",
+                command=lambda m=model_id: self.set_api_model_name(m),
+            ).grid(row=row_index, column=4, padx=2)
+            tk.Button(
+                holder, text="Test",
+                command=lambda m=model_id: self.test_api(m),
+            ).grid(row=row_index, column=5, padx=2)
+            row_index += 1
+        tk.Label(holder, text="Browser sites:", font=("TkDefaultFont", 9, "bold")).grid(
+            row=row_index, column=0, sticky="w", pady=(8, 0)
+        )
+        row_index += 1
+        for site_id in BROWSER_MODEL_IDS:
+            entry = self.settings.browser_model(site_id)
+            tk.Label(holder, text=SITE_INFO[site_id]["display_name"], width=18,
+                     anchor="w").grid(row=row_index, column=0, sticky="w")
+            tk.Label(
+                holder,
+                text="user: " + ((entry.get("username") or "not set")[:18]),
+                width=22, anchor="w",
+            ).grid(row=row_index, column=1, columnspan=2, sticky="w")
+            tk.Button(
+                holder, text="Set login details",
+                command=lambda s=site_id: self.set_site_login(s),
+            ).grid(row=row_index, column=3, sticky="w", padx=2)
+            tk.Label(
+                holder,
+                text="login: " + (
+                    "verified " + entry["last_login_ok"][:10]
+                    if entry.get("last_login_ok") else "never"
+                ),
+                width=22, anchor="w",
+            ).grid(row=row_index, column=4, sticky="w")
+            tk.Button(
+                holder, text="Log in now",
+                command=lambda s=site_id: self.login_now(s),
+            ).grid(row=row_index, column=5, padx=2)
+            row_index += 1
+        bottom = tk.Frame(holder)
+        bottom.grid(row=row_index, column=0, columnspan=6, sticky="w", pady=(8, 0))
+        tk.Button(
+            bottom,
+            text="Browser automation setup (Playwright: {})".format(
+                "installed" if llm_browser.PLAYWRIGHT_AVAILABLE else "NOT INSTALLED"
+            ),
+            command=self.playwright_setup,
+        ).pack(side="left")
+        tk.Button(bottom, text="Options...", command=self.options_dialog).pack(
+            side="left", padx=8
+        )
+
+    def set_api_key(self, model_id):
+        value = self.gui.simpledialog.askstring(
+            "API key",
+            "Paste the API key for {} (it will be hidden):".format(
+                API_REGISTRY[model_id]["display_name"]
+            ),
+            parent=self.root, show="*",
+        )
+        if value and value.strip():
+            self.settings.api_model(model_id)["api_key"] = value.strip()
+            self.settings.save()
+            self.refresh_settings_rows()
+            self.refresh_model_checkboxes()
+
+    def set_api_model_name(self, model_id):
+        registry = API_REGISTRY[model_id]
+        value = self.gui.simpledialog.askstring(
+            "Model name",
+            "Model name for {} (leave empty for the default, {}):".format(
+                registry["display_name"], registry["default_model"]
+            ),
+            parent=self.root,
+        )
+        if value is None:
+            return
+        self.settings.api_model(model_id)["model"] = value.strip()
+        self.settings.save()
+        self.refresh_settings_rows()
+
+    def test_api(self, model_id):
+        if self.settings_task.running or self.task.running:
+            return
+        options = dict(self.settings.data["options"])
+        options["max_retries"] = 1
+        entry = self.settings.api_model(model_id)
+        display = API_REGISTRY[model_id]["display_name"]
+        self.settings_log.log("Contacting {}...".format(display))
+
+        def work(ui):
+            return call_api_model(
+                model_id, entry, "Reply with the single word OK.", options, log=ui.log
+            )
+
+        def done(result, error):
+            if error is not None:
+                self.settings_log.log("Test failed: {}".format(error))
+            else:
+                self.settings_log.log(
+                    "Success. {} answered and reported model '{}'.".format(
+                        display, result["model_reported"]
+                    )
+                )
+
+        self.settings_task.start(work, on_done=done)
+
+    def set_site_login(self, site_id):
+        display = SITE_INFO[site_id]["display_name"]
+        entry = self.settings.browser_model(site_id)
+        username = self.gui.simpledialog.askstring(
+            "Username", "Username / email for {}:".format(display),
+            parent=self.root, initialvalue=entry.get("username", ""),
+        )
+        if username is None:
+            return
+        entry["username"] = username.strip()
+        password = self.gui.simpledialog.askstring(
+            "Password (optional)",
+            "Password for {} (hidden). Leaving this EMPTY and typing it in the "
+            "browser window yourself is recommended:".format(display),
+            parent=self.root, show="*",
+        )
+        if password:
+            entry["password"] = password.strip()
+        self.settings.save()
+        self.refresh_settings_rows()
+
+    def login_now(self, site_id):
+        if not llm_browser.PLAYWRIGHT_AVAILABLE:
+            self.gui.messagebox.showinfo(
+                "Setup needed",
+                "Browser automation is not set up yet - click 'Browser automation "
+                "setup' first.",
+                parent=self.root,
+            )
+            return
+        if self.settings_task.running or self.task.running:
+            return
+
+        def work(ui):
+            from playwright.sync_api import sync_playwright
+
+            driver = make_driver(site_id)
+            with sync_playwright() as playwright:
+                context = open_site_context(playwright, site_id)
+                try:
+                    page = context.pages[0] if context.pages else context.new_page()
+                    if interactive_login(
+                        driver, page, self.settings.browser_model(site_id), ui
+                    ):
+                        self.settings.save()
+                        ui.log("Logged in to {}. The login is remembered for future "
+                               "runs.".format(driver.display_name))
+                finally:
+                    try:
+                        context.close()
+                    except Exception:
+                        pass
+
+        self.settings_task.start(work, on_done=lambda r, e: self.refresh_settings_rows())
+
+    def playwright_setup(self):
+        if llm_browser.PLAYWRIGHT_AVAILABLE:
+            self.gui.messagebox.showinfo(
+                "Already installed", "Browser automation (Playwright) is already installed.",
+                parent=self.root,
+            )
+            return
+        if not self.gui.messagebox.askyesno(
+            "One-time setup",
+            "The browser models need one extra piece of software (Playwright) and "
+            "a browser for it to drive - a one-time download of a few hundred "
+            "MB.\n\nInstall it now?",
+            parent=self.root,
+        ):
+            return
+        if self.settings_task.running or self.task.running:
+            return
+
+        def work(ui):
+            for args, label in (
+                ([sys.executable, "-m", "pip", "install", "playwright"],
+                 "Installing Playwright"),
+                ([sys.executable, "-m", "playwright", "install", "chromium"],
+                 "Downloading the browser"),
+            ):
+                ui.log(label + "...")
+                process = subprocess.Popen(
+                    args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                )
+                for line in process.stdout:
+                    ui.log("  " + line.rstrip())
+                if process.wait() != 0:
+                    ui.log("That step did not finish successfully - please try again "
+                           "or ask for help with the messages above.")
+                    return
+            ui.log("Done. Please close this program and start it again so the "
+                   "browser models become available.")
+
+        self.settings_task.start(work)
+
+    def options_dialog(self):
+        tk = self.gui.tk
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Options")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        labels = [
+            ("request_timeout_s", "Seconds to wait for an API answer"),
+            ("max_retries", "How many times to retry a busy API"),
+            ("browser_question_delay_s", "Pause between browser questions (seconds)"),
+            ("answer_stable_seconds", "Seconds a browser answer must hold still"),
+            ("answer_max_wait_seconds", "Longest wait for one browser answer (seconds)"),
+        ]
+        entries = {}
+        for i, (key, label) in enumerate(labels):
+            tk.Label(dialog, text=label + ":", anchor="w").grid(
+                row=i, column=0, sticky="w", padx=10, pady=3
+            )
+            entry = tk.Entry(dialog, width=8)
+            entry.insert(0, str(self.settings.option(key)))
+            entry.grid(row=i, column=1, padx=10)
+            entries[key] = entry
+        deep = tk.BooleanVar(value=bool(self.settings.option("deep_thinking")))
+        tk.Checkbutton(
+            dialog, text="Deep thinking (models reason at length before answering)",
+            variable=deep, anchor="w",
+        ).grid(row=len(labels), column=0, columnspan=2, sticky="w", padx=10, pady=3)
+        test_model = tk.BooleanVar(value=bool(self.settings.option("enable_test_model")))
+        tk.Checkbutton(
+            dialog, text="Fake test model for trying things out",
+            variable=test_model, anchor="w",
+        ).grid(row=len(labels) + 1, column=0, columnspan=2, sticky="w", padx=10, pady=3)
+
+        def save():
+            for key, entry in entries.items():
+                value = entry.get().strip()
+                if value.isdigit() and int(value) > 0:
+                    self.settings.data["options"][key] = int(value)
+            self.settings.data["options"]["deep_thinking"] = deep.get()
+            self.settings.data["options"]["enable_test_model"] = test_model.get()
+            self.settings.save()
+            dialog.destroy()
+            self.refresh_model_checkboxes()
+
+        tk.Button(dialog, text="Save", width=10, command=save).grid(
+            row=len(labels) + 2, column=0, pady=10
+        )
+        tk.Button(dialog, text="Cancel", width=10, command=dialog.destroy).grid(
+            row=len(labels) + 2, column=1, pady=10
+        )
+
+    def on_close(self):
+        if self.task.running:
+            if not self.gui.messagebox.askyesno(
+                "A run is in progress",
+                "A run is still working. Everything answered so far is saved.\n\n"
+                "Close anyway?",
+                parent=self.root,
+            ):
+                return
+        self.root.destroy()
 
 
-# ---------- main ----------
+class _GuiModules:
+    def __init__(self, tk, ttk, messagebox, simpledialog):
+        self.tk = tk
+        self.ttk = ttk
+        self.messagebox = messagebox
+        self.simpledialog = simpledialog
 
 
 def main():
-    print("=" * 60)
-    print("LLM Medical Cases - LLM Runner (for the PI)")
-    print("=" * 60)
+    import tkinter as tk
+    from tkinter import ttk, messagebox, simpledialog
+    import gui_common
+
+    root = gui_common.make_root("LLM Runner (for the PI)", 1020, 720)
     try:
         settings = SettingsStore.load_or_create()
         case_sets = CaseSetStore.load_or_create()
         answers = AnswersStore.load_or_create()
         master = MasterStore.load(MASTER_FILENAME) if os.path.exists(MASTER_FILENAME) else None
-    except (CaseStoreError, OSError) as e:
-        print("Error: {}".format(e))
-        prompt("Press Enter to close. ")
+    except (CaseStoreError, OSError) as error:
+        gui_common.show_error("Cannot start", str(error))
+        root.destroy()
         return 1
 
     if answers.prompt_template_version is None:
         answers.prompt_template_version = PROMPT_TEMPLATE_VERSION
-    elif answers.prompt_template_version != PROMPT_TEMPLATE_VERSION:
-        print(
-            "Note: earlier answers were collected with a different wording of the\n"
-            "question sent to the models (version {} vs {} now).".format(
-                answers.prompt_template_version, PROMPT_TEMPLATE_VERSION
-            )
+    app = RunnerApp(
+        root, master, answers, settings, case_sets,
+        _GuiModules(tk, ttk, messagebox, simpledialog),
+    )
+    if answers.answers and AnswersStore.load_or_create().prompt_template_version not in (
+        None, PROMPT_TEMPLATE_VERSION
+    ):
+        app.run_log.log(
+            "Note: earlier answers were collected with a different wording of the "
+            "question sent to the models."
         )
-
-    if master is None:
-        print(
-            "\nNo master case database ({}) was found in this folder.\n"
-            "Run merge_cases.py first, or copy the file here. You can still "
-            "open Settings.".format(MASTER_FILENAME)
-        )
-    else:
-        providers = {c["provider_number"] for c in master.cases.values()}
-        print("Master file: {} - {} cases from {} provider{}.".format(
-            MASTER_FILENAME, len(master.cases), len(providers),
-            "" if len(providers) == 1 else "s",
-        ))
-        print("Answers so far: {}.".format(len(answers.answers)))
-
-    while True:
-        if master is None:
-            choice = prompt("\n[S]ettings  [Q]uit > ").strip().lower()
-        else:
-            choice = prompt(
-                "\n[R]un cases through LLMs  [C]ase sets  [A]nswers so far  "
-                "[S]ettings  [Q]uit > "
-            ).strip().lower()
-        try:
-            if choice == "q":
-                print("All answers are saved in answers.json.")
-                prompt("Press Enter to close. ")
-                return 0
-            if choice == "s":
-                settings_menu(settings)
-            elif master is not None and choice == "r":
-                run_flow(master, answers, settings, case_sets)
-            elif master is not None and choice == "c":
-                case_sets_menu(master, case_sets)
-            elif master is not None and choice == "a":
-                answers_menu(master, answers, settings)
-            elif choice:
-                print("Please choose one of the letters shown.")
-        except CaseStoreError as e:
-            print("Error: {}".format(e))
-        except KeyboardInterrupt:
-            print("\n(Interrupted - back to the main menu. Everything is saved.)")
+    root.mainloop()
+    return 0
 
 
 if __name__ == "__main__":
