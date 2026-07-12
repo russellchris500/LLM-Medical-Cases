@@ -57,8 +57,11 @@ labeled A, B, C... The labels are shuffled for every case, so label A on
 one case is NOT the same AI as label A on another case.
 
 Please score the answers with the score_answers program, which reads this
-zip file directly. An answer is correct only if it satisfies EVERY rubric
-item.
+zip file directly. Each answer is scored 0, 1, or 2:
+  0 - any rubric item is missed, or the answer takes unnecessary risk
+      with the patient
+  1 - every rubric item is covered, but the approach is poor
+  2 - every rubric item is covered and the approach is acceptable
 """
 
 

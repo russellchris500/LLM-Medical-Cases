@@ -100,9 +100,14 @@ Used by the scorer (a provider) to grade the blinded answers in a package.
 - Reads the zip from Program 4 directly; shows each answer beside its case
   text and rubric, still blinded. Answer images are pulled out of the zip
   and can be opened in the computer's normal image viewer.
-- For each rubric item the scorer marks met / not met (y/n); a case answer
-  is **correct only if every rubric item is met** (computed automatically).
-  An optional comment can be attached to any answer.
+- Each answer is scored **0, 1, or 2**, computed automatically from the
+  scorer's y/n judgments:
+  - **0** — any rubric item is missed, *or* the answer takes unnecessary
+    risk with the patient (asked only when all items are covered);
+  - **1** — every rubric item is covered but the approach is poor;
+  - **2** — every rubric item is covered and the approach is acceptable.
+  The per-item judgments, the risk and approach judgments, and an optional
+  comment are all recorded alongside the score.
 - Grades are saved after every answer, so the scorer can stop anytime and
   continue later; answers can also be re-graded (previous judgments become
   the defaults).
@@ -116,9 +121,9 @@ Used by the scorer (a provider) to grade the blinded answers in a package.
 
 Used by the PI to aggregate scores and rank the LLMs.
 
-- Joins `scores.json` files to the key files, then computes per-LLM metrics:
-  cases fully correct (all rubric items met), fraction of rubric items met,
-  breakdowns by provider and by case.
+- Joins `scores.json` files to the key files, then computes per-LLM metrics
+  on the 0–2 scale: average score, share of answers scoring 2 (and 0),
+  fraction of rubric items met, breakdowns by provider and by case.
 - Produces a summary table and CSV export for statistical analysis.
 
 ## Data Formats
@@ -258,7 +263,9 @@ python3 score_answers.py
 
 The program finds the zip by itself, asks for your name or initials, and
 walks you through every ungraded answer: the case text, the answer (with any
-images, which it can open for you), and the rubric one item at a time (y/n).
+images, which it can open for you), the rubric one item at a time (y/n), and
+— when every item is covered — two follow-up questions (unnecessary risk?
+poor approach?) from which the 0/1/2 score is computed automatically.
 Stop anytime with S — everything you finish is saved to
 `scores_<package>.json` immediately, and running the program again continues
 where you left off. **P** shows progress, **R** re-grades a single answer.

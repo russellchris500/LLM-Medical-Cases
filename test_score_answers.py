@@ -16,6 +16,7 @@ from score_answers import (
     PackageError,
     ScoresStore,
     StopScoring,
+    compute_score,
     find_package_zips,
     grade_one,
     scores_path_for,
@@ -112,51 +113,94 @@ class ScoreAnswersTests(unittest.TestCase):
         with open(paths[0], "rb") as f:
             self.assertEqual(f.read(), b"\x89PNG fake image bytes")
 
+    def test_compute_score_rule(self):
+        self.assertEqual(compute_score([True, False], None, None), 0)  # item missed
+        self.assertEqual(compute_score([True, True], True, None), 0)   # risk taken
+        self.assertEqual(compute_score([True, True], False, True), 1)  # poor approach
+        self.assertEqual(compute_score([True, True], False, False), 2)
+        self.assertEqual(compute_score([], None, None), 2)  # vacuous but defined
+
     def test_scores_store_roundtrip_and_resume(self):
         store = ScoresStore.load_or_create("scores_pkg.json", self.package.manifest)
         store.scorer = "Dr Test"
-        store.upsert("003-001", "A", [True, False], "close but wrong")
+        store.upsert("003-001", "A", [True, False], None, None, "close but wrong")
         reloaded = ScoresStore.load_or_create("scores_pkg.json", self.package.manifest)
         self.assertEqual(reloaded.scorer, "Dr Test")
         record = reloaded.get("003-001", "A")
         self.assertEqual(record["rubric_results"], [True, False])
-        self.assertFalse(record["correct"])
+        self.assertEqual(record["score"], 0)
+        self.assertIsNone(record["unnecessary_risk"])
+        self.assertIsNone(record["poor_approach"])
         self.assertEqual(record["comment"], "close but wrong")
 
-    def test_correct_requires_every_rubric_item(self):
+    def test_upsert_computes_all_three_scores(self):
         store = ScoresStore.load_or_create("scores_pkg.json", self.package.manifest)
-        store.upsert("003-001", "A", [True, True])
-        store.upsert("003-001", "B", [True, False])
-        self.assertTrue(store.get("003-001", "A")["correct"])
-        self.assertFalse(store.get("003-001", "B")["correct"])
+        store.upsert("003-001", "A", [True, True], False, False)
+        store.upsert("003-001", "B", [True, True], False, True)
+        store.upsert("003-002", "A", [True, True], True, None)
+        self.assertEqual(store.get("003-001", "A")["score"], 2)
+        self.assertEqual(store.get("003-001", "B")["score"], 1)
+        self.assertEqual(store.get("003-002", "A")["score"], 0)
 
     def test_scores_file_for_wrong_package_rejected(self):
         store = ScoresStore.load_or_create("scores_pkg.json", self.package.manifest)
-        store.upsert("003-001", "A", [True, True])
+        store.upsert("003-001", "A", [True, True], False, False)
         with self.assertRaises(PackageError):
             ScoresStore.load_or_create(
                 "scores_pkg.json", {"package_id": "pkg_other", "package_name": "x"}
             )
 
-    def test_grade_one_scripted(self):
-        store = ScoresStore.load_or_create("scores_pkg.json", self.package.manifest)
-        case, answer = next(
+    def pick_plain_answer(self):
+        return next(
             (c, a) for c, a in self.package.all_answers()
             if c["case_id"] == "003-001" and not a["images"]
         )
-        score_answers.prompt = ScriptedPrompt(["y", "n", "needs work"])
+
+    def test_grade_one_missed_item_scores_zero_without_extra_questions(self):
+        store = ScoresStore.load_or_create("scores_pkg.json", self.package.manifest)
+        case, answer = self.pick_plain_answer()
+        scripted = ScriptedPrompt(["y", "n", "needs work"])
+        score_answers.prompt = scripted
         grade_one(self.package, store, case, answer)
         record = store.get("003-001", answer["label"])
         self.assertEqual(record["rubric_results"], [True, False])
-        self.assertFalse(record["correct"])
+        self.assertEqual(record["score"], 0)
+        self.assertIsNone(record["unnecessary_risk"])  # never asked
+        self.assertIsNone(record["poor_approach"])
         self.assertEqual(record["comment"], "needs work")
+        # 2 rubric prompts + 1 comment prompt, nothing else.
+        self.assertEqual(len(scripted.asked), 3)
+
+    def test_grade_one_risk_scores_zero(self):
+        store = ScoresStore.load_or_create("scores_pkg.json", self.package.manifest)
+        case, answer = self.pick_plain_answer()
+        score_answers.prompt = ScriptedPrompt(["y", "y", "y", "risky plan"])
+        grade_one(self.package, store, case, answer)
+        record = store.get("003-001", answer["label"])
+        self.assertEqual(record["score"], 0)
+        self.assertTrue(record["unnecessary_risk"])
+        self.assertIsNone(record["poor_approach"])  # skipped once risk = yes
+
+    def test_grade_one_poor_approach_scores_one(self):
+        store = ScoresStore.load_or_create("scores_pkg.json", self.package.manifest)
+        case, answer = self.pick_plain_answer()
+        score_answers.prompt = ScriptedPrompt(["y", "y", "n", "y", ""])
+        grade_one(self.package, store, case, answer)
+        record = store.get("003-001", answer["label"])
+        self.assertEqual(record["score"], 1)
+        self.assertFalse(record["unnecessary_risk"])
+        self.assertTrue(record["poor_approach"])
+
+    def test_grade_one_clean_answer_scores_two(self):
+        store = ScoresStore.load_or_create("scores_pkg.json", self.package.manifest)
+        case, answer = self.pick_plain_answer()
+        score_answers.prompt = ScriptedPrompt(["y", "y", "n", "n", ""])
+        grade_one(self.package, store, case, answer)
+        self.assertEqual(store.get("003-001", answer["label"])["score"], 2)
 
     def test_grade_one_stop_saves_nothing(self):
         store = ScoresStore.load_or_create("scores_pkg.json", self.package.manifest)
-        case, answer = next(
-            (c, a) for c, a in self.package.all_answers()
-            if c["case_id"] == "003-001" and not a["images"]
-        )
+        case, answer = self.pick_plain_answer()
         score_answers.prompt = ScriptedPrompt(["y", "s"])
         with self.assertRaises(StopScoring):
             grade_one(self.package, store, case, answer)
@@ -164,17 +208,17 @@ class ScoreAnswersTests(unittest.TestCase):
 
     def test_regrade_defaults_to_previous_answers(self):
         store = ScoresStore.load_or_create("scores_pkg.json", self.package.manifest)
-        case, answer = next(
-            (c, a) for c, a in self.package.all_answers()
-            if c["case_id"] == "003-001" and not a["images"]
-        )
-        score_answers.prompt = ScriptedPrompt(["n", "y", "first pass"])
+        case, answer = self.pick_plain_answer()
+        score_answers.prompt = ScriptedPrompt(["y", "y", "n", "y", "first pass"])
         grade_one(self.package, store, case, answer)
-        # Re-grade pressing Enter twice keeps [False, True] and the comment.
-        score_answers.prompt = ScriptedPrompt(["", "", ""])
+        # Re-grading with Enter everywhere keeps every judgment and comment.
+        score_answers.prompt = ScriptedPrompt(["", "", "", "", ""])
         grade_one(self.package, store, case, answer)
         record = store.get("003-001", answer["label"])
-        self.assertEqual(record["rubric_results"], [False, True])
+        self.assertEqual(record["rubric_results"], [True, True])
+        self.assertFalse(record["unnecessary_risk"])
+        self.assertTrue(record["poor_approach"])
+        self.assertEqual(record["score"], 1)
         self.assertEqual(record["comment"], "first pass")
 
     def test_scores_path_naming(self):

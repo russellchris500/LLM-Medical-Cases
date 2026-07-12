@@ -3,7 +3,12 @@
 
 A scorer receives a scoring package (a .zip built by the PI with Program 4)
 by email and grades the anonymized AI answers in it against each case's
-rubric. An answer is correct only if it satisfies EVERY rubric item.
+rubric. Each answer gets a score of 0, 1, or 2:
+
+  0 - any rubric item is missed, OR the answer takes unnecessary risk
+      with the patient (even if every item is covered)
+  1 - every rubric item is covered, but the approach is poor
+  2 - every rubric item is covered and the approach is acceptable
 
 Everything is menu-driven - put this file in the same folder as the zip and
 run:  python3 score_answers.py
@@ -168,6 +173,15 @@ class ScoresStore:
                 and isinstance(record.get("rubric_results"), list)
             ):
                 raise PackageError("{} contains an invalid score record.".format(path))
+            if "score" not in record:
+                # Grades saved by an older version: fill in the 0/1/2 score.
+                record.setdefault("unnecessary_risk", None)
+                record.setdefault("poor_approach", None)
+                record["score"] = compute_score(
+                    record["rubric_results"],
+                    record["unnecessary_risk"],
+                    record["poor_approach"],
+                )
             store.scores[(record["case_id"], record["label"])] = record
         return store
 
@@ -189,16 +203,36 @@ class ScoresStore:
     def get(self, case_id, label):
         return self.scores.get((case_id, label))
 
-    def upsert(self, case_id, label, rubric_results, comment=""):
+    def upsert(self, case_id, label, rubric_results, unnecessary_risk, poor_approach, comment=""):
         self.scores[(case_id, label)] = {
             "case_id": case_id,
             "label": label,
             "rubric_results": list(rubric_results),
-            "correct": all(rubric_results),
+            "unnecessary_risk": unnecessary_risk,
+            "poor_approach": poor_approach,
+            "score": compute_score(rubric_results, unnecessary_risk, poor_approach),
             "comment": comment,
             "scored_at": now_iso(),
         }
         self.save()
+
+
+def compute_score(rubric_results, unnecessary_risk, poor_approach):
+    """The 0/1/2 scoring rule.
+
+    0 - a rubric item is missed, or unnecessary risk was taken
+    1 - everything covered but the approach is poor
+    2 - everything covered, approach acceptable
+    unnecessary_risk / poor_approach are None when the question never
+    applied (a missed item already forced the score to 0).
+    """
+    if not all(rubric_results):
+        return 0
+    if unnecessary_risk:
+        return 0
+    if poor_approach:
+        return 1
+    return 2
 
 
 # ---------- interactive interface ----------
@@ -288,7 +322,10 @@ def grade_one(package, scores, case, answer, position=None):
     print(answer.get("response_text", "").strip() or "(no text)")
     show_images(package, answer)
     print("-" * 60)
-    print("Rubric - the answer is correct only if it satisfies EVERY item.")
+    print("Rubric - each answer is scored 0, 1, or 2:")
+    print("  0 = a rubric item is missed, or unnecessary risk is taken")
+    print("  1 = everything covered but the approach is poor")
+    print("  2 = everything covered and the approach is acceptable")
     for i, item in enumerate(case["rubric"], start=1):
         print("  {}. {}".format(i, item))
 
@@ -296,40 +333,61 @@ def grade_one(package, scores, case, answer, position=None):
     if existing:
         print("(You graded this answer before - your previous answers are the defaults.)")
 
-    results = []
-    print("For each rubric item, does the answer satisfy it?")
-    for i, item in enumerate(case["rubric"], start=1):
-        default = None
-        if existing and i - 1 < len(existing["rubric_results"]):
-            default = existing["rubric_results"][i - 1]
+    def ask_yes_no(question, default):
         hint = "y/n"
         if default is True:
             hint = "Y/n"
         elif default is False:
             hint = "y/N"
         while True:
-            raw = prompt("  {}. {} [{}]: ".format(i, item, hint)).strip().lower()
+            raw = prompt("{} [{}]: ".format(question, hint)).strip().lower()
             if not raw and default is not None:
-                results.append(default)
-                break
+                return default
             if raw in ("y", "yes"):
-                results.append(True)
-                break
+                return True
             if raw in ("n", "no"):
-                results.append(False)
-                break
+                return False
             if raw in ("q", "s"):
                 print("  Stopping here - nothing was recorded for this answer.")
                 raise StopScoring()
             print("  Please answer y or n (or S to stop; nothing is saved for this answer).")
 
-    met = sum(results)
-    verdict = "CORRECT" if all(results) else "INCORRECT"
-    print("Result: {} ({} of {} rubric items met).".format(verdict, met, len(results)))
+    results = []
+    print("For each rubric item, does the answer cover it?")
+    for i, item in enumerate(case["rubric"], start=1):
+        default = None
+        if existing and i - 1 < len(existing.get("rubric_results", [])):
+            default = existing["rubric_results"][i - 1]
+        results.append(ask_yes_no("  {}. {}".format(i, item), default))
+
+    unnecessary_risk = None
+    poor_approach = None
+    if not all(results):
+        missed = sum(1 for r in results if not r)
+        reason = "{} rubric item{} missed".format(missed, "" if missed == 1 else "s")
+    else:
+        unnecessary_risk = ask_yes_no(
+            "All items are covered. Did the answer take any unnecessary risk "
+            "with the patient?",
+            existing.get("unnecessary_risk") if existing else None,
+        )
+        if unnecessary_risk:
+            reason = "unnecessary risk to the patient"
+        else:
+            poor_approach = ask_yes_no(
+                "Was the approach poor, even though everything was covered?",
+                existing.get("poor_approach") if existing else None,
+            )
+            reason = "poor approach" if poor_approach else "all items covered, sound approach"
+
+    score = compute_score(results, unnecessary_risk, poor_approach)
+    print("Score: {} - {}.".format(score, reason))
     comment = prompt("Any comment for the investigator? (Enter for none): ").strip()
     if not comment and existing:
         comment = existing.get("comment", "")
-    scores.upsert(case["case_id"], answer["label"], results, comment)
+    scores.upsert(
+        case["case_id"], answer["label"], results, unnecessary_risk, poor_approach, comment
+    )
     print("Saved.")
 
 
@@ -381,8 +439,9 @@ def rescore_one(package, scores):
 
 
 def progress_view(package, scores):
-    total = graded = correct = 0
-    print("\nProgress by case:")
+    total = graded = 0
+    tallies = {0: 0, 1: 0, 2: 0}
+    print("\nProgress by case (0-2 scale):")
     for case in package.cases:
         line = "  {}: ".format(case["case_id"])
         marks = []
@@ -393,12 +452,16 @@ def progress_view(package, scores):
                 marks.append("{} -".format(answer["label"]))
             else:
                 graded += 1
-                correct += 1 if record["correct"] else 0
-                marks.append("{} {}".format(
-                    answer["label"], "correct" if record["correct"] else "incorrect"
-                ))
+                tallies[record["score"]] = tallies.get(record["score"], 0) + 1
+                marks.append("{} score {}".format(answer["label"], record["score"]))
         print(line + ",  ".join(marks))
-    print("\nGraded {} of {} answers ({} judged correct).".format(graded, total, correct))
+    summary = "\nGraded {} of {} answers".format(graded, total)
+    if graded:
+        average = sum(score * count for score, count in tallies.items()) / graded
+        summary += " ({}x score 0, {}x score 1, {}x score 2; average {:.2f})".format(
+            tallies.get(0, 0), tallies.get(1, 0), tallies.get(2, 0), average
+        )
+    print(summary + ".")
 
 
 def main():
