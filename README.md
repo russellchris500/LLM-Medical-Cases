@@ -7,17 +7,17 @@ are ranked based on their scores.
 
 ## Project Plan
 
-The framework consists of five programs, run in sequence:
+The framework consists of six programs, run in sequence:
 
 ```
- Program 1            Program 2            Program 3            Program 4            Program 5
-┌────────────┐       ┌────────────┐       ┌────────────┐       ┌────────────┐       ┌────────────┐
-│   Case     │ email │   Case     │       │    LLM     │       │   Answer   │       │    LLM     │
-│  Editor    ├──────►│  Merger    ├──────►│   Runner   ├──────►│   Scorer   ├──────►│  Ranker    │
-│ (provider) │       │    (PI)    │       │    (PI)    │       │ (provider) │       │    (PI)    │
-└────────────┘       └────────────┘       └────────────┘       └────────────┘       └────────────┘
- provider_NNN_        master_cases.json    answers.json         scores.json          final report
- cases.json
+ Program 1        Program 2        Program 3        Program 4        Program 5        Program 6
+┌───────────┐    ┌───────────┐    ┌───────────┐    ┌───────────┐    ┌───────────┐    ┌───────────┐
+│   Case    │ em │   Case    │    │    LLM    │    │  Scoring  │ em │  Answer   │ em │    LLM    │
+│  Editor   ├───►│  Merger   ├───►│  Runner   ├───►│  Package  ├───►│  Scorer   ├───►│  Ranker   │
+│(provider) │ail │   (PI)    │    │   (PI)    │    │Builder(PI)│ail │ (scorer)  │ail │   (PI)    │
+└───────────┘    └───────────┘    └───────────┘    └───────────┘    └───────────┘    └───────────┘
+ provider_NNN_    master_          answers.json     <name>.zip       scores.json      final report
+ cases.json       cases.json       + images         (blinded)
 ```
 
 ### Program 1 — Case Editor (`case_editor.py`) ✅ implemented
@@ -51,36 +51,58 @@ single master database (`master_cases.json`).
   the PI is prompted (defaulting to the newer `updated_at` version), and
   cases the provider deleted are kept unless the PI confirms removal.
 
-### Program 3 — LLM Runner (`run_llms.py`) — planned
+### Program 3 — LLM Runner (`run_llms.py`) ✅ implemented
 
-Used by the PI to run selected cases through multiple LLMs.
+Used by the PI to run selected cases through selected LLMs.
 
-- Reads `master_cases.json` and a config file listing the LLMs to query
-  (model name, API provider, key, temperature, etc.).
-- Sends each case's case text to each configured LLM with a standardized
-  prompt, and records the raw answers.
-- Output: `answers.json` — one record per (case ID, model) pair, including
-  timestamps and model/version metadata for reproducibility.
-- Handles rate limits and retries; can resume an interrupted run.
+- **API models** (Anthropic Claude, OpenAI GPT, Google Gemini, xAI Grok) run
+  unattended once an API key is entered in the in-program Settings menu.
+- **Browser models with no API** (OpenEvidence, UpToDate, Doximity GPT) are
+  driven through a visible browser window with Playwright; answer text *and
+  images* are captured, along with a full-page screenshot of every answer.
+- Cases are selectable individually, as consecutive ranges
+  (`003-001..003-020`), per provider, or all — and any selection can be
+  **saved under a name and recalled later**, so the same case set can be run
+  against a newly added LLM.
+- Output: `answers.json` + `answer_images/` — one record per (case ID, model)
+  pair with the exact prompt sent, timestamps, and model/version metadata.
+  Every answer is saved as soon as it arrives, so an interrupted run resumes
+  automatically (finished pairs are skipped).
+- Handles rate limits and retries; a bad API key stops that model (not the
+  whole run) with a plain-language message.
 
-### Program 4 — Answer Scorer (`score_answers.py`) — planned
+### Program 4 — Scoring Package Builder (`build_scoring_package.py`) ✅ implemented
 
-Used by providers to grade the LLM answers against the rubrics.
+Used by the PI to bundle answers into a zip file that is emailed to a scorer.
+Cases and LLMs for the scorer are selected here, **independently** of what was
+selected when the answers were collected.
 
-- Presents each answer alongside its case text and rubric, **blinded to which
-  LLM produced it** (answers are shown in random order under anonymous labels)
-  to avoid bias.
+- **Blinding:** inside the zip, answers are labeled only A, B, C..., shuffled
+  per case, and image files are renamed to the blinded labels. The
+  label→model key is written to a separate `*_KEY_DO_NOT_SEND.json` file
+  that stays with the PI.
+- Warns when an answer's text mentions an AI by name (self-identification)
+  and when the case wording changed after an answer was collected.
+- Offers to split packages larger than 20 MB into email-sized parts.
+
+### Program 5 — Answer Scorer (`score_answers.py`) — planned
+
+Used by the scorer (a provider) to grade the blinded answers in a package.
+
+- Reads the zip from Program 4 directly; shows each answer beside its case
+  text and rubric, still blinded.
 - For each rubric item the scorer marks met / not met; a case answer is
   correct only if every rubric item is met.
-- Output: `scores.json` — per (case ID, model, rubric item) judgments plus the
-  overall correct/incorrect result per answer.
+- Output: `scores.json` — per (case ID, label, rubric item) judgments, emailed
+  back to the PI, who joins them to models using the package's key file.
 
-### Program 5 — LLM Ranker (`rank_llms.py`) — planned
+### Program 6 — LLM Ranker (`rank_llms.py`) — planned
 
 Used by the PI to aggregate scores and rank the LLMs.
 
-- Per-LLM metrics: cases fully correct (all rubric items met), fraction of
-  rubric items met, breakdowns by provider and by case.
+- Joins `scores.json` files to the key files, then computes per-LLM metrics:
+  cases fully correct (all rubric items met), fraction of rubric items met,
+  breakdowns by provider and by case.
 - Produces a summary table and CSV export for statistical analysis.
 
 ## Data Formats
@@ -110,7 +132,7 @@ version. The provider case file produced by Program 1 looks like:
 }
 ```
 
-Both programs are fully menu-driven — no command-line options to remember.
+All programs are fully menu-driven — no command-line options to remember.
 You just run the program and answer its questions.
 
 ## Program 1 Usage (for providers)
@@ -159,8 +181,70 @@ versions of each changed case and asks which to keep, suggesting the newer
 one; cases missing from the new file (deleted by the provider) are kept
 unless you confirm their removal.
 
+## Program 3 Usage (for the PI)
+
+Run it in the same folder as `master_cases.json`:
+
+```
+python3 run_llms.py
+```
+
+The menu offers **R**un, **C**ase sets, **A**nswers so far, **S**ettings, and
+**Q**uit. A run has three steps: choose the cases (all / typed IDs and ranges
+like `003-001..003-020` / one provider / a saved set — typed selections can be
+saved under a name for reuse), choose the LLMs (the list shows which are ready
+and how many of the chosen cases each has already answered), then confirm.
+Already-answered pairs are skipped automatically; previously failed pairs are
+offered for retry.
+
+**Settings** holds the API keys (typed with hidden input, shown last-4 only)
+and the site logins. `settings.json` is saved with private permissions —
+keep it out of email and version control.
+
+**One-time setup for the browser models:** Settings → "Browser automation
+setup" installs Playwright and a browser for it to drive (a few hundred MB,
+with your consent). Then use "Log in now" under each site: a browser window
+opens, you finish the login yourself — including any verification code or
+CAPTCHA, which the program never automates — and the login is remembered for
+future runs. During a browser run you should stay at the computer; if a site
+misbehaves, the program offers to retry, let you drive that case by hand
+(it still captures the text, images, and a screenshot), skip it, or set the
+site aside. If a site changes its design, a replacement `site_selectors.json`
+file placed next to the program fixes the automation without code changes.
+
+Please note: automated querying of subscription sites (OpenEvidence, UpToDate,
+Doximity) happens under your own accounts and is your responsibility under
+those services' terms.
+
+## Program 4 Usage (for the PI)
+
+```
+python3 build_scoring_package.py
+```
+
+Choose the cases (from those that have answers) and the AIs to include —
+these choices are independent of how the answers were collected, so you can
+send different scorers different slices. The program checks coverage (cases
+missing an answer from some AI can be included as-is or excluded), then
+builds `scoring_packages/<name>.zip` — email that file to the scorer. The
+matching `<name>_KEY_DO_NOT_SEND.json` reveals which AI wrote each answer:
+it stays with you and is needed later by the ranker. **Never send the key
+file to a scorer.**
+
+## Files created alongside the programs
+
+| File / folder | Created by | Notes |
+|---|---|---|
+| `provider_NNN_cases.json` | Program 1 | email to the PI |
+| `master_cases.json` | Program 2 | the PI's case database |
+| `settings.json` | Program 3 | API keys and logins — **keep private** |
+| `case_sets.json` | Programs 3/4 | saved case selections |
+| `answers.json`, `answer_images/` | Program 3 | collected answers |
+| `browser_profiles/` | Program 3 | remembered site logins |
+| `scoring_packages/` | Program 4 | zips to email + key files to keep |
+
 ## Tests
 
 ```
-python3 -m unittest test_case_editor.py test_merge_cases.py
+python3 -m unittest discover -p "test_*.py"
 ```
