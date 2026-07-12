@@ -19,10 +19,12 @@ Design notes:
   program stays usable even after a total site redesign.
 """
 
+import base64
 import copy
 import json
 import os
 import time
+import urllib.parse
 
 try:
     from playwright.sync_api import sync_playwright  # noqa: F401
@@ -212,6 +214,55 @@ def find_first(page, selector_list):
     return None
 
 
+EXT_FOR_MIME = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/svg+xml": ".svg",
+    "image/bmp": ".bmp",
+    "image/tiff": ".tif",
+}
+
+# In-page fetch used when a direct download is impossible (blob: URLs) -
+# runs inside the site's own page, so cookies and blobs both work.
+_FETCH_IMAGE_JS = """async e => {
+    const src = e.currentSrc || e.src;
+    if (!src) return "";
+    const resp = await fetch(src);
+    const buf = await resp.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let s = "";
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+}"""
+
+
+def sniff_image_extension(data, content_type="", src=""):
+    """File extension from the image bytes themselves (most reliable),
+    then the Content-Type, then the URL; None if it isn't image data."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if data[:2] == b"\xff\xd8":
+        return ".jpg"
+    if data[:4] in (b"GIF8",):
+        return ".gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    if b"<svg" in data[:512].lower():
+        return ".svg"
+    if data[:2] == b"BM":
+        return ".bmp"
+    mime = (content_type or "").split(";")[0].strip().lower()
+    if mime in EXT_FOR_MIME:
+        return EXT_FOR_MIME[mime]
+    url_ext = os.path.splitext(urllib.parse.urlparse(src).path)[1].lower()
+    if url_ext in EXT_FOR_MIME.values():
+        return url_ext
+    return None
+
+
 class BrowserAnswer:
     def __init__(self, text, image_paths, model_reported, manual=False):
         self.text = text
@@ -365,6 +416,60 @@ class SiteDriver:
 
     # ---- capturing the answer ----
 
+    def download_image(self, page, element):
+        """The actual image file behind an <img>: (bytes, extension), or
+        (None, None) so the caller falls back to an element screenshot.
+
+        Three routes, in order: data: URLs are decoded directly; normal
+        URLs are downloaded with the browser's own cookies (works behind
+        the sites' logins); blob:/other URLs are fetched from inside the
+        page itself. Whatever arrives is only accepted if it really is
+        image data."""
+        try:
+            src = element.evaluate("e => e.currentSrc || e.src || ''") or ""
+        except Exception:
+            src = ""
+        if not src:
+            return None, None
+
+        if src.startswith("data:"):
+            try:
+                header, _, payload = src.partition(",")
+                if ";base64" in header:
+                    data = base64.b64decode(payload)
+                else:
+                    data = urllib.parse.unquote_to_bytes(payload)
+                extension = sniff_image_extension(data, header[5:], src)
+                if data and extension:
+                    return data, extension
+            except Exception:
+                pass
+            return None, None
+
+        if not src.startswith("blob:"):
+            try:
+                response = page.request.get(src)
+                if response.ok:
+                    data = response.body()
+                    extension = sniff_image_extension(
+                        data, response.headers.get("content-type", ""), src
+                    )
+                    if data and extension:
+                        return data, extension
+            except Exception:
+                pass
+
+        try:
+            encoded = element.evaluate(_FETCH_IMAGE_JS)
+            if encoded:
+                data = base64.b64decode(encoded)
+                extension = sniff_image_extension(data, "", src)
+                if data and extension:
+                    return data, extension
+        except Exception:
+            pass
+        return None, None
+
     def extract_answer(self, page, images_dir, basename, baseline="", manual=False):
         container = find_first(page, self.selectors["answer_container"])
         text = ""
@@ -398,8 +503,21 @@ class SiteDriver:
                     if not box or box["width"] < 100 or box["height"] < 100:
                         continue
                     counter += 1
-                    path = os.path.join(images_dir, "{}_{:03d}.png".format(basename, counter))
-                    element.screenshot(path=path)
+                    # The REAL image file first (downloaded through the
+                    # site's own logged-in session); a screenshot of the
+                    # element is only the last resort.
+                    data, extension = self.download_image(page, element)
+                    if data:
+                        path = os.path.join(
+                            images_dir, "{}_{:03d}{}".format(basename, counter, extension)
+                        )
+                        with open(path, "wb") as f:
+                            f.write(data)
+                    else:
+                        path = os.path.join(
+                            images_dir, "{}_{:03d}.png".format(basename, counter)
+                        )
+                        element.screenshot(path=path)
                     image_paths.append(path)
                 except Exception:
                     continue

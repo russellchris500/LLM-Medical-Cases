@@ -59,8 +59,11 @@ Used by the PI to run selected cases through selected LLMs.
   unattended once an API key is entered in the in-program Settings menu.
 - **Browser models with no API** (OpenEvidence, UpToDate, Doximity GPT,
   ChatGPT for Clinicians) are
-  driven through a visible browser window with Playwright; answer text *and
-  images* are captured, along with a full-page screenshot of every answer.
+  driven through a visible browser window with Playwright; answer text is
+  captured together with the **actual image files** in the answer
+  (downloaded through the site's own logged-in session; an element
+  screenshot is used only if a download is impossible), plus a full-page
+  screenshot of every answer as an audit trail.
 - **Deep thinking, no memory.** Every model is asked to reason at length
   before answering (Claude extended thinking, GPT high reasoning effort,
   Gemini dynamic thinking; Grok 4 always reasons), and every case is a
