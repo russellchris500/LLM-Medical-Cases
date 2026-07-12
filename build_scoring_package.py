@@ -13,7 +13,8 @@ what or follow one AI's style across cases. The label-to-model key is
 written to a separate file that stays with the PI and must NEVER be sent
 to a scorer.
 
-Everything is menu-driven - just run:  python3 build_scoring_package.py
+It is a window-based program - run it (or double-click
+"Build Scoring Package.pyw") and work in the window.
 
 Requires only the Python 3 standard library.
 """
@@ -26,7 +27,7 @@ import string
 import tempfile
 import zipfile
 
-from case_editor import CaseStoreError, now_iso, prompt
+from case_editor import CaseStoreError, now_iso
 from merge_cases import MASTER_FILENAME, MasterStore
 from eval_common import (
     AnswersStore,
@@ -239,203 +240,246 @@ def build_package(name, case_ids, model_ids, master, answers, out_dir=PACKAGES_D
     return zip_path, key_path
 
 
-# ---------- interactive flow ----------
+# ---------- window interface ----------
 
 
-def choose_package_cases(master, answers, case_sets):
-    """Pick cases from those that actually have usable answers."""
-    answered = {
-        case_id: master.cases[case_id]
-        for case_id in answers.answered_case_ids()
-        if case_id in master.cases
-    }
-    orphans = [c for c in answers.answered_case_ids() if c not in master.cases]
-    if orphans:
-        print(
-            "Note: {} answered case{} no longer in master_cases.json and cannot be\n"
-            "packaged (the case text lives only there): {}\n"
-            "Re-merge the provider's file to bring {} back.".format(
-                len(orphans), " is" if len(orphans) == 1 else "s are",
-                ", ".join(orphans), "it" if len(orphans) == 1 else "them",
+class PackageBuilderApp:
+    def __init__(self, root, master, answers, case_sets, gui):
+        self.root = root
+        self.master = master
+        self.answers = answers
+        self.case_sets = case_sets
+        self.gui = gui
+        tk = gui.tk
+        import gui_common
+
+        usable = answers.answered_case_ids()
+        self.usable_cases = [c for c in usable if c in master.cases]
+        self.orphans = [c for c in usable if c not in master.cases]
+        self.model_vars = {}
+
+        top = tk.Label(
+            root,
+            text="Choose the cases and the AIs to send to a scorer. The zip is "
+            "blinded; the matching *_KEY_DO_NOT_SEND.json stays with you.",
+            anchor="w", justify="left",
+        )
+        top.pack(fill="x", padx=8, pady=(8, 0))
+
+        body = tk.Frame(root)
+        body.pack(fill="both", expand=True, padx=8, pady=8)
+
+        left = tk.Frame(body)
+        left.pack(side="left", fill="both", expand=True)
+        tk.Label(left, text="Cases with usable answers (click to select, "
+                 "Ctrl-click for several):", anchor="w").pack(fill="x")
+        self.case_tree = gui_common.make_table(
+            left, [("case", "Case"), ("count", "Answers"), ("text", "Case text")],
+            widths={"case": 80, "count": 70, "text": 330},
+        )
+        self.case_tree.master.pack(fill="both", expand=True, pady=4)
+        row = tk.Frame(left)
+        row.pack(fill="x")
+        tk.Button(row, text="Select all", command=self.select_all).pack(side="left")
+        tk.Label(row, text="  or type a range:").pack(side="left")
+        self.expression = tk.Entry(row, width=28)
+        self.expression.pack(side="left", padx=4)
+        tk.Button(row, text="Apply", command=self.apply_expression).pack(side="left")
+
+        right = tk.Frame(body)
+        right.pack(side="left", fill="y", padx=(10, 0))
+        tk.Label(right, text="AIs to include:", anchor="w").pack(fill="x")
+        for model_id in answers.model_ids():
+            count = sum(
+                1 for c in self.usable_cases
+                if (answers.get(c, model_id) or {}).get("status") in OK_STATUSES
             )
-        )
-    if not answered:
-        print("No cases have usable answers yet - run run_llms.py first.")
-        return None
-
-    per_case = {c: len([1 for (cid, m), r in answers.answers.items()
-                        if cid == c and r.get("status") in OK_STATUSES])
-                for c in answered}
-    while True:
-        print("\nChoose the cases for the scorer ({} cases have answers).".format(len(answered)))
-        print("  [A]ll of them")
-        print("  [E]nter case IDs or ranges")
-        print("  [L]ist cases with their answer counts")
-        print("  [S]aved case set                     ({} saved)".format(len(case_sets.sets)))
-        choice = prompt("Choose A, E, L, or S (blank to cancel): ").strip().lower()
-        if not choice:
-            return None
-        if choice == "a":
-            return sort_case_ids(answered)
-        if choice == "l":
-            for case_id in sort_case_ids(answered):
-                print("  {}  {} answer{}".format(
-                    case_id, per_case[case_id], "" if per_case[case_id] == 1 else "s"
-                ))
-            continue
-        if choice == "s":
-            names = sorted(case_sets.sets, key=str.lower)
-            if not names:
-                print("There are no saved case sets yet.")
+            if count == 0:
                 continue
-            for i, set_name in enumerate(names, start=1):
-                print("  {}. {}  ({} cases)".format(
-                    i, set_name, len(case_sets.sets[set_name]["case_ids"])
-                ))
-            raw = prompt("Which set? Enter its number (blank to cancel): ").strip()
-            if not raw.isdigit() or not 1 <= int(raw) <= len(names):
-                continue
-            present, missing = case_sets.resolve(names[int(raw) - 1], answered)
-            if missing:
-                print("  {} case{} in the set have no usable answers and will be "
-                      "left out: {}".format(
-                          len(missing), "" if len(missing) == 1 else "s", ", ".join(missing)))
-            if present:
-                return present
-            print("None of that set's cases have answers.")
-            continue
-        if choice == "e":
-            expression = prompt("Enter cases (e.g. 003-001..003-020): ").strip()
-            if not expression:
-                continue
-            try:
-                selected, warnings = parse_selection(expression, answered)
-            except SelectionError as e:
-                print(str(e))
-                continue
-            for warning in warnings:
-                print("  Note: {}".format(warning))
-            if selected:
-                return selected
-            print("That selection matched no cases with answers.")
-            continue
-        print("Please choose A, E, L, or S.")
+            var = tk.BooleanVar(value=True)
+            self.model_vars[model_id] = var
+            display = model_id
+            for c in self.usable_cases:
+                record = answers.get(c, model_id)
+                if record is not None:
+                    display = record.get("model_display_name") or model_id
+                    break
+            tk.Checkbutton(
+                right, text="{}  ({} answers)".format(display, count), variable=var,
+                anchor="w",
+            ).pack(fill="x")
+        tk.Label(right, text="").pack()
+        tk.Label(right, text="Package name (e.g. pilot20-drsmith):", anchor="w").pack(fill="x")
+        self.name_entry = tk.Entry(right, width=28)
+        self.name_entry.pack(fill="x", pady=(0, 6))
+        tk.Button(right, text="Build the package", command=self.build).pack(fill="x")
+        tk.Label(right, text="What happened:", anchor="w").pack(fill="x", pady=(10, 0))
+        self.log = gui_common.LogBox(right, height=12).pack(fill="both", expand=True)
 
+        if self.orphans:
+            self.log.log(
+                "Note: {} answered case(s) are no longer in master_cases.json and "
+                "cannot be packaged: {}. Re-merge the provider file to bring "
+                "them back.".format(len(self.orphans), ", ".join(self.orphans))
+            )
+        self.fill_cases()
 
-def choose_package_models(answers, case_ids):
-    available = answers.model_ids()
-    usable = [
-        m for m in available
-        if any(
-            (answers.get(c, m) or {}).get("status") in OK_STATUSES for c in case_ids
-        )
-    ]
-    if not usable:
-        print("None of the models have usable answers for those cases.")
-        return None
-    display = {}
-    for model_id in usable:
-        for c in case_ids:
-            record = answers.get(c, model_id)
-            if record is not None:
-                display[model_id] = record.get("model_display_name") or model_id
-                break
-    print("\nChoose the AIs whose answers go to the scorer:")
-    for i, model_id in enumerate(usable, start=1):
-        count = sum(
-            1 for c in case_ids
-            if (answers.get(c, model_id) or {}).get("status") in OK_STATUSES
-        )
-        print("  {}. {:22s} answers for {}/{} of the chosen cases".format(
-            i, display.get(model_id, model_id), count, len(case_ids)
-        ))
-    raw = prompt("Enter numbers (e.g. 1,3) or A for all (blank to cancel): ").strip()
-    if not raw:
-        return None
-    if raw.lower() in ("a", "all"):
-        return usable
-    chosen = []
-    for part in raw.replace(",", " ").split():
-        if not part.isdigit() or not 1 <= int(part) <= len(usable):
-            print("There is no model number {}.".format(part))
-            return None
-        if usable[int(part) - 1] not in chosen:
-            chosen.append(usable[int(part) - 1])
-    return chosen or None
+    def fill_cases(self):
+        per_case = {
+            c: sum(
+                1 for (cid, m), r in self.answers.answers.items()
+                if cid == c and r.get("status") in OK_STATUSES
+            )
+            for c in self.usable_cases
+        }
+        for case_id in self.usable_cases:
+            case = self.master.cases[case_id]
+            flat = " ".join(case["case_text"].split())
+            self.case_tree.insert(
+                "", "end", iid=case_id,
+                values=(case_id, per_case[case_id], flat[:60]),
+            )
 
+    def select_all(self):
+        self.case_tree.selection_set(self.case_tree.get_children())
 
-def coverage_check(master, answers, case_ids, model_ids):
-    """Handle holes in the case x model grid; returns the final case list."""
-    holes = []
-    failed = []
-    changed = []
-    for case_id in case_ids:
-        for model_id in model_ids:
-            record = answers.get(case_id, model_id)
-            if record is None:
-                holes.append((case_id, model_id))
-            elif record.get("status") not in OK_STATUSES:
-                failed.append((case_id, model_id))
-            elif record.get("case_sha256") != case_hash(master.cases[case_id]):
-                changed.append((case_id, model_id))
-    if failed:
-        print("\n{} answer{} failed when collected and will not be included:".format(
-            len(failed), "" if len(failed) == 1 else "s"
-        ))
+    def apply_expression(self):
+        expression = self.expression.get().strip()
+        if not expression:
+            return
+        available = {c: self.master.cases[c] for c in self.usable_cases}
+        try:
+            selected, warnings = parse_selection(expression, available)
+        except SelectionError as error:
+            self.gui.messagebox.showerror("Cannot read that", str(error), parent=self.root)
+            return
+        for warning in warnings:
+            self.log.log("Note: " + warning)
+        self.case_tree.selection_set([c for c in selected])
+
+    def chosen_cases(self):
+        return [iid for iid in self.case_tree.selection()]
+
+    def chosen_models(self):
+        return [m for m, var in self.model_vars.items() if var.get()]
+
+    def build(self):
+        import gui_common
+
+        case_ids = sort_case_ids(self.chosen_cases())
+        model_ids = self.chosen_models()
+        if not case_ids:
+            self.gui.messagebox.showinfo(
+                "No cases selected", "Click the cases to include first (or Select all).",
+                parent=self.root,
+            )
+            return
+        if not model_ids:
+            self.gui.messagebox.showinfo(
+                "No AIs selected", "Tick at least one AI to include.", parent=self.root
+            )
+            return
+        name = self.name_entry.get().strip()
+        if not SET_NAME_RE.match(name or ""):
+            self.gui.messagebox.showinfo(
+                "Package name needed",
+                "Give the package a name using only letters, digits, dots, dashes, "
+                "and underscores (up to 40 characters).",
+                parent=self.root,
+            )
+            return
+
+        # Coverage check
+        holes, failed, changed = [], [], []
+        for case_id in case_ids:
+            for model_id in model_ids:
+                record = self.answers.get(case_id, model_id)
+                if record is None:
+                    holes.append((case_id, model_id))
+                elif record.get("status") not in OK_STATUSES:
+                    failed.append((case_id, model_id))
+                elif record.get("case_sha256") != case_hash(self.master.cases[case_id]):
+                    changed.append((case_id, model_id))
         for case_id, model_id in failed[:10]:
-            print("  {} x {}".format(case_id, model_id))
-    if changed:
-        print("\nNote: for {} answer{} the case wording changed after the answer was\n"
-              "collected (shown to the scorer as-is):".format(
-                  len(changed), "" if len(changed) == 1 else "s"))
+            self.log.log("Left out (failed when collected): {} x {}".format(case_id, model_id))
         for case_id, model_id in changed[:10]:
-            print("  {} x {}".format(case_id, model_id))
-    incomplete = sorted({c for c, _ in holes + failed}, key=split_case_id)
-    if incomplete:
-        print("\n{} case{} not have an answer from every chosen AI:".format(
-            len(incomplete), " does" if len(incomplete) == 1 else "s do"
-        ))
-        for case_id in incomplete[:10]:
-            have = [m for m in model_ids
-                    if (answers.get(case_id, m) or {}).get("status") in OK_STATUSES]
-            print("  {}  (has: {})".format(case_id, ", ".join(have) or "none"))
-        while True:
-            choice = prompt(
-                "[I]nclude those cases with the answers they have  "
-                "[E]xclude incomplete cases  [C]ancel: "
-            ).strip().lower()
-            if choice == "c":
-                return None
-            if choice == "i":
-                break
-            if choice == "e":
+            self.log.log(
+                "Note: the wording of case {} changed after {}'s answer was "
+                "collected.".format(case_id, model_id)
+            )
+        incomplete = sorted({c for c, _ in holes + failed}, key=split_case_id)
+        if incomplete:
+            choice = gui_common.ask_choice(
+                self.root,
+                "Some cases are incomplete",
+                "{} of the selected cases do not have an answer from every chosen "
+                "AI (e.g. {}).".format(len(incomplete), ", ".join(incomplete[:6])),
+                [
+                    ("include", "Include them with the answers they have"),
+                    ("exclude", "Exclude the incomplete cases"),
+                    ("cancel", "Cancel"),
+                ],
+            )
+            if choice in (None, "cancel"):
+                return
+            if choice == "exclude":
                 case_ids = [c for c in case_ids if c not in set(incomplete)]
-                break
-    final = [
-        c for c in case_ids
-        if any((answers.get(c, m) or {}).get("status") in OK_STATUSES for m in model_ids)
-    ]
-    if not final:
-        print("Nothing left to package.")
-        return None
-    return final
+        case_ids = [
+            c for c in case_ids
+            if any(
+                (self.answers.get(c, m) or {}).get("status") in OK_STATUSES
+                for m in model_ids
+            )
+        ]
+        if not case_ids:
+            self.gui.messagebox.showinfo(
+                "Nothing to package", "No selected case has a usable answer.",
+                parent=self.root,
+            )
+            return
+
+        zip_path = os.path.join(PACKAGES_DIR, name + ".zip")
+        if os.path.exists(zip_path) and not self.gui.messagebox.askyesno(
+            "Replace package?",
+            "A package named {} already exists. Replace it?".format(name),
+            parent=self.root,
+        ):
+            return
+
+        try:
+            zip_path, key_path = build_package(
+                name, case_ids, model_ids, self.master, self.answers, warn=self.log.log
+            )
+        except (CaseStoreError, OSError) as error:
+            self.gui.messagebox.showerror("Could not build it", str(error), parent=self.root)
+            return
+
+        size = os.path.getsize(zip_path)
+        if size > EMAIL_SIZE_LIMIT and self.gui.messagebox.askyesno(
+            "Large package",
+            "The package is {:.1f} MB, which may be too large to email (most "
+            "mail systems cap attachments around 25 MB).\n\nSplit it into "
+            "parts of at most 20 MB?".format(size / (1024 * 1024)),
+            parent=self.root,
+        ):
+            parts = split_package(zip_path, name, case_ids, model_ids,
+                                  self.master, self.answers, key_path)
+            for part in parts:
+                self.log.log("Built {}  ({:.1f} MB)".format(
+                    part, os.path.getsize(part) / (1024 * 1024)
+                ))
+        else:
+            self.log.log("Built {}  ({:.1f} MB) - email this to the scorer.".format(
+                zip_path, size / (1024 * 1024)
+            ))
+        self.log.log(
+            "The *_KEY_DO_NOT_SEND.json file(s) in {} stay with you - NEVER "
+            "send them to a scorer.".format(PACKAGES_DIR)
+        )
 
 
-def maybe_split(zip_path, name, case_ids, model_ids, master, answers, key_path):
-    size = os.path.getsize(zip_path)
-    if size <= EMAIL_SIZE_LIMIT:
-        return [zip_path]
-    print(
-        "\nThe package is {:.1f} MB, which may be too large to email "
-        "(most mail systems cap attachments around 25 MB).".format(size / (1024 * 1024))
-    )
-    choice = prompt(
-        "[S]plit it into parts of at most 20 MB  [K]eep it as one file: "
-    ).strip().lower()
-    if choice != "s":
-        return [zip_path]
-
-    # Split by whole cases: pack greedily until a part would exceed the cap.
+def split_package(zip_path, name, case_ids, model_ids, master, answers, key_path):
+    """Split by whole cases into parts of at most EMAIL_SIZE_LIMIT."""
     parts = []
     chunk = []
     number = 1
@@ -459,124 +503,50 @@ def maybe_split(zip_path, name, case_ids, model_ids, master, answers, key_path):
             part_name, chunk, model_ids, master, answers, warn=lambda *_: None
         )
         parts.append(part_path)
-    # The split parts have their own keys; keep only those and remove the
-    # oversized original so there's one obvious thing to send per part.
     os.unlink(zip_path)
     os.unlink(key_path)
-    print("Split into {} parts (each with its own key file):".format(len(parts)))
     return parts
 
 
-def build_flow(master, answers, case_sets):
-    case_ids = choose_package_cases(master, answers, case_sets)
-    if not case_ids:
-        return
-    model_ids = choose_package_models(answers, case_ids)
-    if not model_ids:
-        return
-    case_ids = coverage_check(master, answers, case_ids, model_ids)
-    if not case_ids:
-        return
-
-    while True:
-        name = prompt("\nName for this package (e.g. pilot20-drsmith): ").strip()
-        if not name:
-            return
-        if not SET_NAME_RE.match(name):
-            print(
-                "Package names may only use letters, digits, dots, dashes, and "
-                "underscores (up to 40 characters)."
-            )
-            continue
-        zip_path = os.path.join(PACKAGES_DIR, name + ".zip")
-        if os.path.exists(zip_path):
-            if prompt(
-                "A package with that name exists. Type yes to replace it: "
-            ).strip().lower() != "yes":
-                continue
-        break
-
-    zip_path, key_path = build_package(name, case_ids, model_ids, master, answers)
-    parts = maybe_split(zip_path, name, case_ids, model_ids, master, answers, key_path)
-
-    print("\nBuilt:")
-    for part in parts:
-        print("  {}  ({:.1f} MB) - email this to the scorer.".format(
-            part, os.path.getsize(part) / (1024 * 1024)
-        ))
-    print(
-        "\nThe matching *_KEY_DO_NOT_SEND.json file(s) in {} stay with you -\n"
-        "they reveal which AI wrote each answer. NEVER send them to a scorer.".format(
-            PACKAGES_DIR
-        )
-    )
-
-
-def list_packages():
-    if not os.path.isdir(PACKAGES_DIR):
-        print("\nNo packages have been built yet.\n")
-        return
-    zips = sorted(f for f in os.listdir(PACKAGES_DIR) if f.endswith(".zip"))
-    if not zips:
-        print("\nNo packages have been built yet.\n")
-        return
-    print("\nBuilt packages in {}:".format(PACKAGES_DIR))
-    for filename in zips:
-        path = os.path.join(PACKAGES_DIR, filename)
-        note = ""
-        try:
-            with zipfile.ZipFile(path) as bundle:
-                manifest = json.loads(bundle.read("package.json"))
-            note = "{} cases, built {}".format(
-                manifest.get("num_cases"), manifest.get("created_at", "")[:10]
-            )
-        except Exception:
-            note = "unreadable"
-        print("  {}  ({:.1f} MB; {})".format(
-            filename, os.path.getsize(path) / (1024 * 1024), note
-        ))
-    print()
+class _GuiModules:
+    def __init__(self, tk, messagebox):
+        self.tk = tk
+        self.messagebox = messagebox
 
 
 def main():
-    print("=" * 60)
-    print("LLM Medical Cases - Scoring Package Builder (for the PI)")
-    print("=" * 60)
+    import tkinter as tk
+    from tkinter import messagebox
+    import gui_common
+    from eval_common import CaseSetStore
+
+    root = gui_common.make_root("Scoring Package Builder (for the PI)", 1000, 620)
     try:
         answers = AnswersStore.load_or_create()
         case_sets = CaseSetStore.load_or_create()
         master = MasterStore.load(MASTER_FILENAME) if os.path.exists(MASTER_FILENAME) else None
-    except (CaseStoreError, OSError) as e:
-        print("Error: {}".format(e))
-        prompt("Press Enter to close. ")
+    except (CaseStoreError, OSError) as error:
+        gui_common.show_error("Cannot start", str(error))
+        root.destroy()
         return 1
     if master is None:
-        print("\nNo master case database ({}) was found in this folder.".format(MASTER_FILENAME))
-        prompt("Press Enter to close. ")
+        gui_common.show_error(
+            "No master database",
+            "No master case database ({}) was found in this folder.\n"
+            "Run the Case Merger first.".format(MASTER_FILENAME),
+        )
+        root.destroy()
         return 1
-    usable = answers.answered_case_ids()
-    print("Answers available: {} covering {} case{} and {} model{}.".format(
-        sum(1 for r in answers.answers.values() if r.get("status") in OK_STATUSES),
-        len(usable), "" if len(usable) == 1 else "s",
-        len(answers.model_ids()), "" if len(answers.model_ids()) == 1 else "s",
-    ))
-
-    while True:
-        choice = prompt(
-            "\n[B]uild a package  [L]ist built packages  [Q]uit > "
-        ).strip().lower()
-        try:
-            if choice == "q":
-                prompt("Press Enter to close. ")
-                return 0
-            if choice == "b":
-                build_flow(master, answers, case_sets)
-            elif choice == "l":
-                list_packages()
-            elif choice:
-                print("Please choose B, L, or Q.")
-        except CaseStoreError as e:
-            print("Error: {}".format(e))
+    if not answers.answered_case_ids():
+        gui_common.show_error(
+            "No answers yet",
+            "No usable answers were found (answers.json). Run the LLM Runner first.",
+        )
+        root.destroy()
+        return 1
+    PackageBuilderApp(root, master, answers, case_sets, _GuiModules(tk, messagebox))
+    root.mainloop()
+    return 0
 
 
 if __name__ == "__main__":

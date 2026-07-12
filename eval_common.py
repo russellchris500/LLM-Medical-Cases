@@ -284,6 +284,7 @@ DEFAULT_SETTINGS = {
         "openevidence": {"username": "", "password": "", "last_login_ok": None},
         "uptodate": {"username": "", "password": "", "last_login_ok": None},
         "doximity": {"username": "", "password": "", "last_login_ok": None},
+        "chatgptclinicians": {"username": "", "password": "", "last_login_ok": None},
     },
     "options": {
         "deep_thinking": True,

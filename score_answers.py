@@ -10,8 +10,8 @@ rubric. Each answer gets a score of 0, 1, or 2:
   1 - every rubric item is covered, but the approach is poor
   2 - every rubric item is covered and the approach is acceptable
 
-Everything is menu-driven - put this file in the same folder as the zip and
-run:  python3 score_answers.py
+It is a normal window-based program: put this file in the same folder as
+the zip you were emailed and double-click it (or run: py score_answers.py).
 
 Your grades are saved to scores_<package name>.json after every answer, so
 you can stop anytime and continue later. When you have graded everything,
@@ -235,7 +235,7 @@ def compute_score(rubric_results, unnecessary_risk, poor_approach):
     return 2
 
 
-# ---------- interactive interface ----------
+# ---------- finding the files ----------
 
 
 def find_package_zips(folder="."):
@@ -254,27 +254,6 @@ def find_package_zips(folder="."):
     return found
 
 
-def choose_package():
-    zips = find_package_zips()
-    if not zips:
-        print(
-            "\nNo scoring package (.zip) was found in this folder.\n"
-            "Save the zip you were emailed into the same folder as this "
-            "program and run it again."
-        )
-        return None
-    if len(zips) == 1:
-        return zips[0]
-    print("\nMore than one scoring package was found in this folder:")
-    for i, name in enumerate(zips, start=1):
-        print("  {}. {}".format(i, name))
-    while True:
-        raw = prompt("Which one do you want to score? Enter its number: ").strip()
-        if raw.isdigit() and 1 <= int(raw) <= len(zips):
-            return zips[int(raw) - 1]
-        print("Please enter a number between 1 and {}.".format(len(zips)))
-
-
 def scores_path_for(zip_name):
     stem = re.sub(r"\.zip$", "", zip_name, flags=re.IGNORECASE)
     return "scores_{}.json".format(stem)
@@ -285,235 +264,520 @@ def images_dir_for(zip_name):
     return "{}_images".format(stem)
 
 
-def show_images(package, answer):
-    if not answer.get("images"):
-        return
-    out_dir = images_dir_for(os.path.basename(package.zip_path))
-    paths = package.extract_images(answer, out_dir)
-    if not paths:
-        return
-    print("\nThis answer includes {} image{} (saved in the folder '{}'):".format(
-        len(paths), "" if len(paths) == 1 else "s", out_dir
-    ))
-    for path in paths:
-        print("  {}".format(path))
-    if prompt("Open the image{} now? [Y/n]: ".format(
-        "" if len(paths) == 1 else "s"
-    )).strip().lower() in ("", "y", "yes"):
-        for path in paths:
-            webbrowser.open("file://" + os.path.abspath(path))
+# ---------- grading model (no window code; unit-testable) ----------
 
 
-class StopScoring(Exception):
-    """The scorer asked to go back to the menu."""
+class AnswerGrader:
+    """Holds one answer's in-progress judgments; the window binds to this.
 
+    The score is 0/1/2: 0 when any rubric item is missed or unnecessary
+    risk was taken, 1 when everything is covered but the approach is poor,
+    2 otherwise. The risk question only applies once every item is
+    covered; the approach question only applies once risk is answered No.
+    """
 
-def grade_one(package, scores, case, answer, position=None):
-    """Show one answer and collect met/not-met for every rubric item."""
-    print("\n" + "=" * 60)
-    header = "Case {} - Answer {}".format(case["case_id"], answer["label"])
-    if position:
-        header += "   ({} of {} answers in this package)".format(*position)
-    print(header)
-    print("=" * 60)
-    print(case["case_text"])
-    print("-" * 60)
-    print("Answer {}:".format(answer["label"]))
-    print(answer.get("response_text", "").strip() or "(no text)")
-    show_images(package, answer)
-    print("-" * 60)
-    print("Rubric - each answer is scored 0, 1, or 2:")
-    print("  0 = a rubric item is missed, or unnecessary risk is taken")
-    print("  1 = everything covered but the approach is poor")
-    print("  2 = everything covered and the approach is acceptable")
-    for i, item in enumerate(case["rubric"], start=1):
-        print("  {}. {}".format(i, item))
+    def __init__(self, rubric, previous=None):
+        previous = previous or {}
+        stored = previous.get("rubric_results", [])
+        self.rubric = list(rubric)
+        self.results = [
+            stored[i] if i < len(stored) else None for i in range(len(rubric))
+        ]
+        self.unnecessary_risk = previous.get("unnecessary_risk")
+        self.poor_approach = previous.get("poor_approach")
+        self.comment = previous.get("comment", "")
 
-    existing = scores.get(case["case_id"], answer["label"])
-    if existing:
-        print("(You graded this answer before - your previous answers are the defaults.)")
+    def set_item(self, index, met):
+        self.results[index] = bool(met)
 
-    def ask_yes_no(question, default):
-        hint = "y/n"
-        if default is True:
-            hint = "Y/n"
-        elif default is False:
-            hint = "y/N"
-        while True:
-            raw = prompt("{} [{}]: ".format(question, hint)).strip().lower()
-            if not raw and default is not None:
-                return default
-            if raw in ("y", "yes"):
-                return True
-            if raw in ("n", "no"):
-                return False
-            if raw in ("q", "s"):
-                print("  Stopping here - nothing was recorded for this answer.")
-                raise StopScoring()
-            print("  Please answer y or n (or S to stop; nothing is saved for this answer).")
+    def all_items_answered(self):
+        return None not in self.results
 
-    results = []
-    print("For each rubric item, does the answer cover it?")
-    for i, item in enumerate(case["rubric"], start=1):
-        default = None
-        if existing and i - 1 < len(existing.get("rubric_results", [])):
-            default = existing["rubric_results"][i - 1]
-        results.append(ask_yes_no("  {}. {}".format(i, item), default))
+    def all_items_met(self):
+        return self.all_items_answered() and all(self.results)
 
-    unnecessary_risk = None
-    poor_approach = None
-    if not all(results):
-        missed = sum(1 for r in results if not r)
-        reason = "{} rubric item{} missed".format(missed, "" if missed == 1 else "s")
-    else:
-        unnecessary_risk = ask_yes_no(
-            "All items are covered. Did the answer take any unnecessary risk "
-            "with the patient?",
-            existing.get("unnecessary_risk") if existing else None,
-        )
-        if unnecessary_risk:
-            reason = "unnecessary risk to the patient"
-        else:
-            poor_approach = ask_yes_no(
-                "Was the approach poor, even though everything was covered?",
-                existing.get("poor_approach") if existing else None,
+    def risk_applies(self):
+        return self.all_items_met()
+
+    def poor_applies(self):
+        return self.risk_applies() and self.unnecessary_risk is False
+
+    def complete(self):
+        if not self.all_items_answered():
+            return False
+        if not self.all_items_met():
+            return True
+        if self.unnecessary_risk is None:
+            return False
+        if self.unnecessary_risk:
+            return True
+        return self.poor_approach is not None
+
+    def normalized(self):
+        """(rubric_results, unnecessary_risk, poor_approach) with the
+        questions that never applied set to None."""
+        if not self.all_items_met():
+            return list(self.results), None, None
+        if self.unnecessary_risk:
+            return list(self.results), True, None
+        return list(self.results), False, self.poor_approach
+
+    def score(self):
+        results, risk, poor = self.normalized()
+        return compute_score(results, risk, poor)
+
+    def explanation(self):
+        if not self.complete():
+            missing = []
+            if not self.all_items_answered():
+                missing.append("answer Covered/Missed for every rubric item")
+            elif self.risk_applies() and self.unnecessary_risk is None:
+                missing.append("answer the unnecessary-risk question")
+            elif self.poor_applies() and self.poor_approach is None:
+                missing.append("answer the poor-approach question")
+            return "To finish: " + " and ".join(missing) + "."
+        score = self.score()
+        if score == 2:
+            return "Score 2 - all items covered, sound approach."
+        if score == 1:
+            return "Score 1 - all items covered but the approach is poor."
+        if not self.all_items_met():
+            missed = sum(1 for r in self.results if r is False)
+            return "Score 0 - {} rubric item{} missed.".format(
+                missed, "" if missed == 1 else "s"
             )
-            reason = "poor approach" if poor_approach else "all items covered, sound approach"
-
-    score = compute_score(results, unnecessary_risk, poor_approach)
-    print("Score: {} - {}.".format(score, reason))
-    comment = prompt("Any comment for the investigator? (Enter for none): ").strip()
-    if not comment and existing:
-        comment = existing.get("comment", "")
-    scores.upsert(
-        case["case_id"], answer["label"], results, unnecessary_risk, poor_approach, comment
-    )
-    print("Saved.")
+        return "Score 0 - unnecessary risk to the patient."
 
 
-def score_remaining(package, scores):
-    pending = [
-        (case, answer)
-        for case, answer in package.all_answers()
-        if scores.get(case["case_id"], answer["label"]) is None
-    ]
-    total = sum(1 for _ in package.all_answers())
-    if not pending:
-        print("\nEverything in this package is already graded. Well done!")
-        return
-    print("\n{} of {} answers still to grade. You can stop anytime with S -\n"
-          "everything you finish is saved immediately.".format(len(pending), total))
-    done_before = total - len(pending)
-    try:
-        for i, (case, answer) in enumerate(pending, start=1):
-            grade_one(package, scores, case, answer, position=(done_before + i, total))
-    except StopScoring:
-        pass
-    remaining = sum(
-        1
-        for case, answer in package.all_answers()
-        if scores.get(case["case_id"], answer["label"]) is None
-    )
-    if remaining == 0:
-        print(
-            "\nAll {} answers are graded. Email {} back to the principal "
-            "investigator.".format(total, scores.path)
-        )
-    else:
-        print("\n{} answer{} left - your progress is saved in {}.".format(
-            remaining, "" if remaining == 1 else "s", scores.path
-        ))
+# ---------- window interface ----------
+#
+# Tkinter ships with Python on Windows, so this stays a one-file program a
+# scorer can just double-click next to the emailed zip.
+
+try:
+    import tkinter as tk
+    from tkinter import messagebox, simpledialog, scrolledtext, ttk
+
+    TK_AVAILABLE = True
+except ImportError:  # pragma: no cover - servers without Tk still run tests
+    TK_AVAILABLE = False
 
 
-def rescore_one(package, scores):
-    case_id = prompt("Case ID (e.g. 003-001): ").strip()
-    label = prompt("Answer letter (e.g. B): ").strip()
-    case, answer = package.find(case_id, label)
-    if case is None:
-        print("There is no answer {} for case {} in this package.".format(label, case_id))
-        return
-    try:
-        grade_one(package, scores, case, answer)
-    except StopScoring:
-        pass
+if TK_AVAILABLE:
 
+    class ScorerApp:
+        def __init__(self, root, package, scores):
+            self.root = root
+            self.package = package
+            self.scores = scores
+            self.entries = list(package.all_answers())  # [(case, answer)]
+            self.index = None
+            self.grader = None
+            self.item_vars = []
+            self._build()
+            self.refresh_progress_list()
+            self.goto(self.first_ungraded(), force=True)
+            root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-def progress_view(package, scores):
-    total = graded = 0
-    tallies = {0: 0, 1: 0, 2: 0}
-    print("\nProgress by case (0-2 scale):")
-    for case in package.cases:
-        line = "  {}: ".format(case["case_id"])
-        marks = []
-        for answer in case["answers"]:
-            total += 1
-            record = scores.get(case["case_id"], answer["label"])
-            if record is None:
-                marks.append("{} -".format(answer["label"]))
+        # ---- layout ----
+
+        def _build(self):
+            self.root.title(
+                "LLM Medical Cases - Answer Scorer - {}".format(
+                    os.path.basename(self.package.zip_path)
+                )
+            )
+            header = tk.Label(
+                self.root,
+                text="The answers are anonymized; the letters are shuffled for every "
+                "case, so answer A on one case is NOT the same AI as on another.",
+                anchor="w",
+            )
+            header.pack(fill="x", padx=8, pady=(8, 0))
+
+            pane = tk.PanedWindow(self.root, orient="horizontal", sashrelief="raised")
+            pane.pack(fill="both", expand=True, padx=8, pady=8)
+
+            left = tk.Frame(pane)
+            tk.Label(left, text="Answers to grade:", anchor="w").pack(fill="x")
+            self.progress_list = tk.Listbox(left, width=26, exportselection=False)
+            self.progress_list.pack(fill="both", expand=True, pady=4)
+            self.progress_list.bind("<<ListboxSelect>>", self.on_pick)
+            self.progress_label = tk.Label(left, text="", anchor="w", justify="left")
+            self.progress_label.pack(fill="x")
+            pane.add(left, minsize=210)
+
+            right = tk.Frame(pane)
+            self.case_header = tk.Label(
+                right, text="", anchor="w", font=("TkDefaultFont", 10, "bold")
+            )
+            self.case_header.pack(fill="x")
+            self.case_text = scrolledtext.ScrolledText(
+                right, height=7, wrap="word", state="disabled"
+            )
+            self.case_text.pack(fill="both", expand=False, pady=(2, 6))
+            answer_row = tk.Frame(right)
+            answer_row.pack(fill="x")
+            self.answer_header = tk.Label(
+                answer_row, text="", anchor="w", font=("TkDefaultFont", 10, "bold")
+            )
+            self.answer_header.pack(side="left")
+            self.images_button = tk.Button(
+                answer_row, text="Open the images", command=self.open_images
+            )
+            self.answer_text = scrolledtext.ScrolledText(
+                right, height=9, wrap="word", state="disabled"
+            )
+            self.answer_text.pack(fill="both", expand=True, pady=(2, 6))
+
+            self.grading_holder = tk.Frame(right)
+            self.grading_holder.pack(fill="x")
+
+            bottom = tk.Frame(right)
+            bottom.pack(fill="x", pady=(6, 0))
+            tk.Label(bottom, text="Comment for the investigator (optional):").pack(anchor="w")
+            self.comment_entry = tk.Entry(bottom)
+            self.comment_entry.pack(fill="x", pady=(0, 6))
+            buttons = tk.Frame(bottom)
+            buttons.pack(fill="x")
+            self.verdict_label = tk.Label(buttons, text="", anchor="w")
+            self.verdict_label.pack(side="left", fill="x", expand=True)
+            self.save_button = tk.Button(
+                buttons, text="Save grade + next", command=self.save_and_next
+            )
+            self.save_button.pack(side="right")
+            pane.add(right)
+
+        # ---- navigation ----
+
+        def first_ungraded(self):
+            for i, (case, answer) in enumerate(self.entries):
+                if self.scores.get(case["case_id"], answer["label"]) is None:
+                    return i
+            return 0 if self.entries else None
+
+        def refresh_progress_list(self):
+            self.progress_list.delete(0, "end")
+            graded = 0
+            tallies = {0: 0, 1: 0, 2: 0}
+            for case, answer in self.entries:
+                record = self.scores.get(case["case_id"], answer["label"])
+                if record is None:
+                    mark = "-"
+                else:
+                    graded += 1
+                    tallies[record["score"]] += 1
+                    mark = "score {}".format(record["score"])
+                self.progress_list.insert(
+                    "end", "{}  {}   {}".format(case["case_id"], answer["label"], mark)
+                )
+            text = "Graded {} of {}.".format(graded, len(self.entries))
+            if graded:
+                text += "\n{}x 0, {}x 1, {}x 2".format(tallies[0], tallies[1], tallies[2])
+            if graded == len(self.entries):
+                text += "\nAll done! Email\n{}\nback to the PI.".format(self.scores.path)
+            self.progress_label.configure(text=text)
+
+        def on_pick(self, _event):
+            selection = self.progress_list.curselection()
+            if selection and selection[0] != self.index:
+                self.goto(selection[0])
+
+        def goto(self, index, force=False):
+            if index is None:
+                return
+            if not force and not self.confirm_leaving():
+                self.progress_list.selection_clear(0, "end")
+                if self.index is not None:
+                    self.progress_list.selection_set(self.index)
+                return
+            self.index = index
+            case, answer = self.entries[index]
+            previous = self.scores.get(case["case_id"], answer["label"])
+            self.grader = AnswerGrader(case["rubric"], previous)
+            self.case_header.configure(text="Case {}".format(case["case_id"]))
+            self._set_text(self.case_text, case["case_text"])
+            self.answer_header.configure(text="Answer {}:".format(answer["label"]))
+            self._set_text(self.answer_text, answer.get("response_text", "") or "(no text)")
+            if answer.get("images"):
+                self.images_button.configure(
+                    text="Open the {} image{}".format(
+                        len(answer["images"]), "" if len(answer["images"]) == 1 else "s"
+                    )
+                )
+                self.images_button.pack(side="right")
             else:
-                graded += 1
-                tallies[record["score"]] = tallies.get(record["score"], 0) + 1
-                marks.append("{} score {}".format(answer["label"], record["score"]))
-        print(line + ",  ".join(marks))
-    summary = "\nGraded {} of {} answers".format(graded, total)
-    if graded:
-        average = sum(score * count for score, count in tallies.items()) / graded
-        summary += " ({}x score 0, {}x score 1, {}x score 2; average {:.2f})".format(
-            tallies.get(0, 0), tallies.get(1, 0), tallies.get(2, 0), average
-        )
-    print(summary + ".")
+                self.images_button.pack_forget()
+            self.comment_entry.delete(0, "end")
+            self.comment_entry.insert(0, self.grader.comment)
+            self.build_grading_rows(case)
+            self.progress_list.selection_clear(0, "end")
+            self.progress_list.selection_set(index)
+            self.progress_list.see(index)
+            self.refresh_verdict()
+
+        def confirm_leaving(self):
+            """Warn when leaving an answer with unsaved judgments."""
+            if self.grader is None or self.index is None:
+                return True
+            case, answer = self.entries[self.index]
+            previous = self.scores.get(case["case_id"], answer["label"])
+            touched = any(r is not None for r in self.grader.results) or (
+                self.comment_entry.get().strip() != (self.grader.comment or "")
+            )
+            if previous is None and touched:
+                return messagebox.askyesno(
+                    "Leave without saving?",
+                    "This answer's grade has not been saved.\n\nLeave anyway?",
+                    parent=self.root,
+                )
+            return True
+
+        # ---- grading widgets ----
+
+        def build_grading_rows(self, case):
+            for child in self.grading_holder.winfo_children():
+                child.destroy()
+            self.item_vars = []
+            tk.Label(
+                self.grading_holder,
+                text="Rubric - scores: 0 = item missed or unnecessary risk, "
+                "1 = covered but poor approach, 2 = covered and sound.",
+                anchor="w",
+                justify="left",
+                wraplength=640,
+            ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
+            for i, item in enumerate(case["rubric"]):
+                var = tk.StringVar(
+                    value="" if self.grader.results[i] is None
+                    else ("yes" if self.grader.results[i] else "no")
+                )
+                self.item_vars.append(var)
+                tk.Label(
+                    self.grading_holder, text="{}. {}".format(i + 1, item),
+                    anchor="w", justify="left", wraplength=460,
+                ).grid(row=i + 1, column=0, sticky="w")
+                tk.Radiobutton(
+                    self.grading_holder, text="Covered", variable=var, value="yes",
+                    tristatevalue="__none__",
+                    command=lambda i=i: self.on_item(i, True),
+                ).grid(row=i + 1, column=1, sticky="w")
+                tk.Radiobutton(
+                    self.grading_holder, text="Missed", variable=var, value="no",
+                    tristatevalue="__none__",
+                    command=lambda i=i: self.on_item(i, False),
+                ).grid(row=i + 1, column=2, sticky="w")
+            base = len(case["rubric"]) + 1
+            self.risk_var = tk.StringVar(
+                value="" if self.grader.unnecessary_risk is None
+                else ("yes" if self.grader.unnecessary_risk else "no")
+            )
+            self.risk_label = tk.Label(
+                self.grading_holder,
+                text="Did the answer take any unnecessary risk with the patient?",
+                anchor="w", justify="left", wraplength=460,
+            )
+            self.risk_label.grid(row=base, column=0, sticky="w", pady=(6, 0))
+            self.risk_yes = tk.Radiobutton(
+                self.grading_holder, text="Yes", variable=self.risk_var, value="yes",
+                tristatevalue="__none__",
+                command=lambda: self.on_risk(True),
+            )
+            self.risk_no = tk.Radiobutton(
+                self.grading_holder, text="No", variable=self.risk_var, value="no",
+                tristatevalue="__none__",
+                command=lambda: self.on_risk(False),
+            )
+            self.risk_yes.grid(row=base, column=1, sticky="w", pady=(6, 0))
+            self.risk_no.grid(row=base, column=2, sticky="w", pady=(6, 0))
+
+            self.poor_var = tk.StringVar(
+                value="" if self.grader.poor_approach is None
+                else ("yes" if self.grader.poor_approach else "no")
+            )
+            self.poor_label = tk.Label(
+                self.grading_holder,
+                text="Was the approach poor, even though everything was covered?",
+                anchor="w", justify="left", wraplength=460,
+            )
+            self.poor_label.grid(row=base + 1, column=0, sticky="w")
+            self.poor_yes = tk.Radiobutton(
+                self.grading_holder, text="Yes", variable=self.poor_var, value="yes",
+                tristatevalue="__none__",
+                command=lambda: self.on_poor(True),
+            )
+            self.poor_no = tk.Radiobutton(
+                self.grading_holder, text="No", variable=self.poor_var, value="no",
+                tristatevalue="__none__",
+                command=lambda: self.on_poor(False),
+            )
+            self.poor_yes.grid(row=base + 1, column=1, sticky="w")
+            self.poor_no.grid(row=base + 1, column=2, sticky="w")
+            self.grading_holder.columnconfigure(0, weight=1)
+            self.refresh_enables()
+
+        def on_item(self, index, met):
+            self.grader.set_item(index, met)
+            self.refresh_enables()
+            self.refresh_verdict()
+
+        def on_risk(self, value):
+            self.grader.unnecessary_risk = value
+            self.refresh_enables()
+            self.refresh_verdict()
+
+        def on_poor(self, value):
+            self.grader.poor_approach = value
+            self.refresh_verdict()
+
+        def refresh_enables(self):
+            risk_state = "normal" if self.grader.risk_applies() else "disabled"
+            for widget in (self.risk_label, self.risk_yes, self.risk_no):
+                widget.configure(state=risk_state)
+            if not self.grader.risk_applies():
+                self.risk_var.set("")
+                self.grader.unnecessary_risk = None
+            poor_state = "normal" if self.grader.poor_applies() else "disabled"
+            for widget in (self.poor_label, self.poor_yes, self.poor_no):
+                widget.configure(state=poor_state)
+            if not self.grader.poor_applies():
+                self.poor_var.set("")
+                self.grader.poor_approach = None
+
+        def refresh_verdict(self):
+            self.verdict_label.configure(text=self.grader.explanation())
+            self.save_button.configure(
+                state="normal" if self.grader.complete() else "disabled"
+            )
+
+        # ---- actions ----
+
+        def open_images(self):
+            case, answer = self.entries[self.index]
+            out_dir = images_dir_for(os.path.basename(self.package.zip_path))
+            paths = self.package.extract_images(answer, out_dir)
+            if not paths:
+                messagebox.showinfo(
+                    "No images", "No image files could be read from the package.",
+                    parent=self.root,
+                )
+                return
+            for path in paths:
+                full = os.path.abspath(path)
+                try:
+                    os.startfile(full)  # Windows default image viewer
+                except AttributeError:
+                    import webbrowser
+
+                    webbrowser.open("file://" + full)
+
+        def save_and_next(self):
+            if not self.grader.complete():
+                return
+            case, answer = self.entries[self.index]
+            results, risk, poor = self.grader.normalized()
+            self.scores.upsert(
+                case["case_id"], answer["label"], results, risk, poor,
+                self.comment_entry.get().strip(),
+            )
+            self.refresh_progress_list()
+            for offset in range(1, len(self.entries) + 1):
+                candidate = (self.index + offset) % len(self.entries)
+                entry_case, entry_answer = self.entries[candidate]
+                if self.scores.get(entry_case["case_id"], entry_answer["label"]) is None:
+                    self.goto(candidate, force=True)
+                    return
+            self.goto(self.index, force=True)  # everything graded; stay put
+            messagebox.showinfo(
+                "All done",
+                "All {} answers are graded.\n\nEmail {} back to the principal "
+                "investigator.".format(len(self.entries), self.scores.path),
+                parent=self.root,
+            )
+
+        def on_close(self):
+            if self.confirm_leaving():
+                self.root.destroy()
+
+        @staticmethod
+        def _set_text(widget, content):
+            widget.configure(state="normal")
+            widget.delete("1.0", "end")
+            widget.insert("1.0", content)
+            widget.configure(state="disabled")
+
+    def pick_zip(root, zips):
+        if len(zips) == 1:
+            return zips[0]
+        dialog = tk.Toplevel(root)
+        dialog.title("Which package?")
+        dialog.grab_set()
+        tk.Label(
+            dialog, text="More than one scoring package was found in this folder.\n"
+            "Which one do you want to score?",
+        ).pack(padx=12, pady=(12, 4))
+        box = tk.Listbox(dialog, width=50, height=min(10, len(zips)))
+        for name in zips:
+            box.insert("end", name)
+        box.selection_set(0)
+        box.pack(padx=12, pady=4)
+        chosen = []
+
+        def accept(_event=None):
+            if box.curselection():
+                chosen.append(zips[box.curselection()[0]])
+            dialog.destroy()
+
+        box.bind("<Double-Button-1>", accept)
+        tk.Button(dialog, text="OK", width=10, command=accept).pack(pady=(4, 12))
+        dialog.wait_window()
+        return chosen[0] if chosen else None
 
 
 def main():
-    print("=" * 60)
-    print("LLM Medical Cases - Answer Scorer")
-    print("=" * 60)
-    zip_name = choose_package()
-    if zip_name is None:
-        prompt("Press Enter to close. ")
+    if not TK_AVAILABLE:
+        print(
+            "This program needs the window system that normally ships with "
+            "Python (Tkinter). Please reinstall Python from python.org with "
+            "the default options."
+        )
         return 1
+    root = tk.Tk()
+    root.title("LLM Medical Cases - Answer Scorer")
+    root.geometry("980x720")
+    root.withdraw()
+    zips = find_package_zips()
+    if not zips:
+        messagebox.showerror(
+            "No package found",
+            "No scoring package (.zip) was found in this folder.\n\nSave the zip "
+            "you were emailed into the same folder as this program and start it "
+            "again.",
+        )
+        root.destroy()
+        return 1
+    zip_name = pick_zip(root, zips)
+    if not zip_name:
+        root.destroy()
+        return 0
     try:
         package = Package.load(zip_name)
         scores = ScoresStore.load_or_create(scores_path_for(zip_name), package.manifest)
-    except PackageError as e:
-        print("Error: {}".format(e))
-        prompt("Press Enter to close. ")
+    except PackageError as error:
+        messagebox.showerror("Cannot open the package", str(error))
+        root.destroy()
         return 1
-
-    total = sum(1 for _ in package.all_answers())
-    print("\nPackage: {}{}".format(zip_name, package.part_note()))
-    print("{} case{}, {} answers to grade; {} graded so far.".format(
-        len(package.cases), "" if len(package.cases) == 1 else "s",
-        total, len(scores.scores),
-    ))
-    print(
-        "The answers are anonymized: the letters are shuffled for every case,\n"
-        "so answer A on one case is NOT the same AI as answer A on another."
-    )
     if not scores.scorer:
-        name = prompt("\nYour name or initials (stored with your grades): ").strip()
-        if name:
-            scores.scorer = name
+        name = simpledialog.askstring(
+            "Your name", "Your name or initials (stored with your grades):", parent=root
+        )
+        if name and name.strip():
+            scores.scorer = name.strip()
             scores.save()
-
-    while True:
-        choice = prompt(
-            "\n[S]core the remaining answers  [R]e-score one answer  "
-            "[P]rogress  [Q]uit > "
-        ).strip().lower()
-        if choice == "q":
-            print("Your grades are saved in {}. When everything is graded, email\n"
-                  "that file back to the principal investigator.".format(scores.path))
-            prompt("Press Enter to close. ")
-            return 0
-        if choice == "s":
-            score_remaining(package, scores)
-        elif choice == "r":
-            rescore_one(package, scores)
-        elif choice == "p":
-            progress_view(package, scores)
-        elif choice:
-            print("Please choose S, R, P, or Q.")
+    ScorerApp(root, package, scores)
+    root.deiconify()
+    root.mainloop()
+    return 0
 
 
 if __name__ == "__main__":

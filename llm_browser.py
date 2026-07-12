@@ -35,7 +35,7 @@ except ImportError:
 PROFILES_DIR = "browser_profiles"
 SELECTOR_OVERRIDE_FILE = "site_selectors.json"
 
-BROWSER_MODEL_IDS = ["openevidence", "uptodate", "doximity"]
+BROWSER_MODEL_IDS = ["openevidence", "uptodate", "doximity", "chatgptclinicians"]
 
 # Ordered fallback lists: each selector is tried in turn until one matches.
 # Written generically (roles, aria labels, broad containers) because the
@@ -114,6 +114,39 @@ DEFAULT_SELECTORS = {
         "password_field": ["input[type='password']"],
         "new_chat": ["[aria-label*='new chat' i]", "[aria-label*='new question' i]", "[data-testid*='new-chat' i]"],
     },
+    "chatgptclinicians": {
+        "question_box": [
+            "#prompt-textarea",
+            "[contenteditable='true']",
+            "textarea",
+        ],
+        "submit_button": [
+            "[data-testid='send-button']",
+            "button[aria-label*='send' i]",
+            "button[type='submit']",
+        ],
+        "answer_container": [
+            "[data-message-author-role='assistant']",
+            "main article",
+            "main",
+            "body",
+        ],
+        # Logged-out chatgpt.com still shows a composer, so the login check
+        # keys on the login/signup buttons rather than a password field.
+        "login_form": [
+            "[data-testid='login-button']",
+            "button[data-testid='signup-button']",
+            "input[type='password']",
+        ],
+        "answer_images": ["img"],
+        "username_field": ["input[type='email']", "input[name*='email' i]"],
+        "password_field": ["input[type='password']"],
+        "new_chat": [
+            "[data-testid='create-new-chat-button']",
+            "[aria-label*='new chat' i]",
+            "a[href='/']",
+        ],
+    },
 }
 
 SITE_INFO = {
@@ -131,6 +164,11 @@ SITE_INFO = {
         "display_name": "Doximity GPT",
         "home_url": "https://www.doximity.com/docs-gpt",
         "login_url": "https://www.doximity.com/docs-gpt",
+    },
+    "chatgptclinicians": {
+        "display_name": "ChatGPT for Clinicians",
+        "home_url": "https://chatgpt.com/",
+        "login_url": "https://chatgpt.com/auth/login",
     },
 }
 
@@ -398,10 +436,22 @@ class DoximityDriver(SiteDriver):
     site_id = "doximity"
 
 
+class ChatGPTCliniciansDriver(SiteDriver):
+    site_id = "chatgptclinicians"
+
+    def is_logged_in(self, page):
+        """chatgpt.com shows a composer even when logged out, so being
+        logged in means the login/signup buttons are gone AND the composer
+        is there. The clinician workspace also requires the right account,
+        which only the user can confirm - the login flow asks them."""
+        return super().is_logged_in(page)
+
+
 DRIVER_CLASSES = {
     "openevidence": OpenEvidenceDriver,
     "uptodate": UpToDateDriver,
     "doximity": DoximityDriver,
+    "chatgptclinicians": ChatGPTCliniciansDriver,
 }
 
 

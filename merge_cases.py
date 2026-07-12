@@ -25,7 +25,7 @@ import re
 import tempfile
 from datetime import datetime
 
-from case_editor import FORMAT_VERSION, CaseStore, CaseStoreError, prompt
+from case_editor import FORMAT_VERSION, CaseStore, CaseStoreError
 
 MASTER_FILENAME = "master_cases.json"
 
@@ -165,92 +165,12 @@ class MasterStore:
         return report
 
 
-# ---------- interactive interface ----------
+# ---------- window interface ----------
 
 
 def preview(case, limit=68):
     flat = " ".join(case["case_text"].split())
     return flat if len(flat) <= limit else flat[: limit - 3] + "..."
-
-
-def ask_yes_no(question, default=False):
-    answer = prompt("{} [{}]: ".format(question, "Y/n" if default else "y/N")).strip().lower()
-    if not answer:
-        return default
-    return answer in ("y", "yes")
-
-
-def on_conflict(existing, incoming):
-    old = parse_timestamp(existing.get("updated_at"))
-    new = parse_timestamp(incoming.get("updated_at"))
-    incoming_newer = old is not None and new is not None and new > old
-    print("\nCase {} differs between the master and the incoming file:".format(existing["case_id"]))
-    print(
-        "  in master : edited {}  ({} rubric items)  {}".format(
-            existing.get("updated_at"), len(existing["rubric"]), preview(existing)
-        )
-    )
-    print(
-        "  incoming  : edited {}  ({} rubric items)  {}".format(
-            incoming.get("updated_at"), len(incoming["rubric"]), preview(incoming)
-        )
-    )
-    if incoming_newer:
-        print("  The incoming version is newer.")
-    return ask_yes_no(
-        "  Replace the master version with the incoming one?", default=incoming_newer
-    )
-
-
-def on_missing(existing):
-    print(
-        "\nCase {} is in the master but not in the incoming file "
-        "(the provider may have deleted it).".format(existing["case_id"])
-    )
-    print("  {}".format(preview(existing)))
-    return ask_yes_no("  Remove it from the master too?", default=False)
-
-
-def print_report(source, provider_number, report):
-    print("\nResult for {} (provider {}):".format(source, provider_number))
-    labels = [
-        ("added", "added"),
-        ("updated", "updated to the newer version"),
-        ("unchanged", "already in the master, unchanged"),
-        ("kept_existing", "kept the master's version"),
-        ("removed", "removed (deleted by the provider)"),
-        ("missing_kept", "missing from the incoming file but kept"),
-    ]
-    for key, label in labels:
-        if report[key]:
-            print("  {:3d} {}: {}".format(len(report[key]), label, ", ".join(report[key])))
-    if not any(report.values()):
-        print("  nothing to do (the incoming file has no cases)")
-
-
-def list_master(master):
-    if not master.cases:
-        print("\nThe master file has no cases yet.\n")
-        return
-    by_provider = {}
-    for case in master.cases.values():
-        by_provider.setdefault(case["provider_number"], []).append(case)
-    print("\nMaster file {}: {} cases from {} provider(s)".format(
-        master.path, len(master.cases), len(by_provider)
-    ))
-    for provider_number in sorted(by_provider):
-        cases = sorted(by_provider[provider_number], key=lambda c: c["case_number"])
-        print("\nProvider {} ({} case{}):".format(
-            provider_number, len(cases), "" if len(cases) == 1 else "s"
-        ))
-        for case in cases:
-            print("  {}  [{} rubric item{}]  {}".format(
-                case["case_id"],
-                len(case["rubric"]),
-                "" if len(case["rubric"]) == 1 else "s",
-                preview(case),
-            ))
-    print()
 
 
 def find_provider_files():
@@ -259,94 +179,198 @@ def find_provider_files():
     )
 
 
-def choose_provider_files():
-    """Show the provider files in this folder and ask which to merge."""
-    files = find_provider_files()
-    if not files:
-        print("\nNo provider case files (provider_NNN_cases.json) were found in this folder.")
-        print("Copy the files the providers emailed you into this folder, then try again.")
-        name = prompt("Or type a file name to merge (press Enter to go back): ").strip()
-        return [name] if name else []
+class MergeApp:
+    def __init__(self, root, master, gui):
+        self.root = root
+        self.master = master
+        self.gui = gui
+        tk = gui.tk
+        self.summary = tk.Label(root, text="", anchor="w")
+        self.summary.pack(fill="x", padx=8, pady=(8, 0))
 
-    print("\nProvider case files found in this folder:")
-    for i, name in enumerate(files, start=1):
-        print("  {}. {}".format(i, name))
-    raw = prompt(
-        "Which do you want to merge? Enter numbers like 1,3 or A for all\n"
-        "(or type a different file name; press Enter to go back): "
-    ).strip()
-    if not raw:
-        return []
-    if raw.lower() in ("a", "all"):
-        return files
-    if re.fullmatch(r"[\d,\s]+", raw):
-        chosen = []
-        for part in raw.replace(",", " ").split():
-            number = int(part)
-            if not 1 <= number <= len(files):
-                print("There is no file number {}. Please try again.".format(number))
-                return []
-            if files[number - 1] not in chosen:
-                chosen.append(files[number - 1])
-        return chosen
-    return [raw]
-
-
-def merge_files(master):
-    paths = choose_provider_files()
-    if not paths:
-        return
-    # Validate every chosen file up front so one bad file stops the merge
-    # before the master is touched.
-    provider_stores = []
-    for path in paths:
-        try:
-            provider_stores.append(CaseStore.load(path))
-        except (CaseStoreError, OSError) as e:
-            print("\nProblem with {}: {}".format(path, e))
-            print("Nothing was merged. Ask the provider to re-send the file, then try again.\n")
-            return
-
-    for path, provider_store in zip(paths, provider_stores):
-        report = master.merge_provider(
-            provider_store, on_conflict=on_conflict, on_missing=on_missing
+        body = tk.Frame(root)
+        body.pack(fill="both", expand=True, padx=8, pady=8)
+        left = tk.Frame(body)
+        left.pack(side="left", fill="y")
+        tk.Label(left, text="Provider case files in this folder:", anchor="w").pack(fill="x")
+        self.file_list = tk.Listbox(left, selectmode="extended", width=36, exportselection=False)
+        self.file_list.pack(fill="y", expand=True, pady=4)
+        row = tk.Frame(left)
+        row.pack(fill="x")
+        tk.Button(row, text="Refresh", command=self.refresh_files).pack(side="left")
+        tk.Button(row, text="Merge selected", command=self.merge_selected).pack(side="left", padx=4)
+        tk.Button(row, text="Merge all", command=self.merge_all).pack(side="left")
+        tk.Button(left, text="View the master database", command=self.view_master).pack(
+            fill="x", pady=(8, 0)
         )
-        print_report(path, provider_store.provider_number, report)
-    master.save()
-    print("\nSaved {} ({} cases total).\n".format(master.path, len(master.cases)))
+
+        right = tk.Frame(body)
+        right.pack(side="left", fill="both", expand=True, padx=(8, 0))
+        tk.Label(right, text="What happened:", anchor="w").pack(fill="x")
+        import gui_common
+        self.log = gui_common.LogBox(right, height=20).pack(fill="both", expand=True, pady=4)
+
+        self.refresh_files()
+        self.update_summary()
+
+    def update_summary(self):
+        providers = {c["provider_number"] for c in self.master.cases.values()}
+        self.summary.configure(
+            text="Master database {}: {} case{} from {} provider{}.".format(
+                MASTER_FILENAME,
+                len(self.master.cases),
+                "" if len(self.master.cases) == 1 else "s",
+                len(providers),
+                "" if len(providers) == 1 else "s",
+            )
+        )
+
+    def refresh_files(self):
+        self.file_list.delete(0, "end")
+        for name in find_provider_files():
+            self.file_list.insert("end", name)
+
+    def merge_selected(self):
+        names = [self.file_list.get(i) for i in self.file_list.curselection()]
+        if not names:
+            self.gui.messagebox.showinfo(
+                "Nothing selected",
+                "Click the provider files you want to merge first (Ctrl-click "
+                "selects several), or use Merge all.",
+                parent=self.root,
+            )
+            return
+        self.merge_files(names)
+
+    def merge_all(self):
+        names = find_provider_files()
+        if not names:
+            self.gui.messagebox.showinfo(
+                "No files found",
+                "No provider case files (provider_NNN_cases.json) were found in "
+                "this folder. Copy the files the providers emailed you next to "
+                "this program, then click Refresh.",
+                parent=self.root,
+            )
+            return
+        self.merge_files(names)
+
+    def on_conflict(self, existing, incoming):
+        import gui_common
+
+        old = parse_timestamp(existing.get("updated_at"))
+        new = parse_timestamp(incoming.get("updated_at"))
+        newer = "incoming" if (old is not None and new is not None and new > old) else "master"
+        message = (
+            "Case {} differs between the master and the incoming file.\n\n"
+            "In the master:  edited {}  ({} rubric items)\n  {}\n\n"
+            "Incoming:  edited {}  ({} rubric items)\n  {}\n\n"
+            "The {} version is newer.".format(
+                existing["case_id"],
+                existing.get("updated_at"), len(existing["rubric"]), preview(existing),
+                incoming.get("updated_at"), len(incoming["rubric"]), preview(incoming),
+                "incoming" if newer == "incoming" else "master's",
+            )
+        )
+        choice = gui_common.ask_choice(
+            self.root,
+            "Which version should be kept?",
+            message,
+            [("incoming", "Use the incoming version"), ("master", "Keep the master's version")],
+        )
+        return choice == "incoming"
+
+    def on_missing(self, existing):
+        return self.gui.messagebox.askyesno(
+            "Case deleted by the provider?",
+            "Case {} is in the master but not in the incoming file (the provider "
+            "may have deleted it).\n\n  {}\n\nRemove it from the master too?\n"
+            "(Choose No to keep it.)".format(existing["case_id"], preview(existing)),
+            parent=self.root,
+        )
+
+    def merge_files(self, names):
+        stores = []
+        for name in names:
+            try:
+                stores.append(CaseStore.load(name))
+            except (CaseStoreError, OSError) as error:
+                self.gui.messagebox.showerror(
+                    "Problem with {}".format(name),
+                    "{}\n\nNothing was merged. Ask the provider to re-send the "
+                    "file, then try again.".format(error),
+                    parent=self.root,
+                )
+                return
+        for name, store in zip(names, stores):
+            report = self.master.merge_provider(
+                store, on_conflict=self.on_conflict, on_missing=self.on_missing
+            )
+            self.log.log("Result for {} (provider {}):".format(name, store.provider_number))
+            labels = [
+                ("added", "added"),
+                ("updated", "updated to the newer version"),
+                ("unchanged", "already in the master, unchanged"),
+                ("kept_existing", "kept the master's version"),
+                ("removed", "removed (deleted by the provider)"),
+                ("missing_kept", "missing from the incoming file but kept"),
+            ]
+            for key, label in labels:
+                if report[key]:
+                    self.log.log(
+                        "   {:3d} {}: {}".format(len(report[key]), label, ", ".join(report[key]))
+                    )
+            if not any(report.values()):
+                self.log.log("   nothing to do (the file has no cases)")
+        try:
+            self.master.save()
+        except OSError as error:
+            self.gui.messagebox.showerror("Could not save", str(error), parent=self.root)
+            return
+        self.log.log("Saved {} ({} cases total).".format(MASTER_FILENAME, len(self.master.cases)))
+        self.log.log("")
+        self.update_summary()
+
+    def view_master(self):
+        import gui_common
+
+        window = self.gui.tk.Toplevel(self.root)
+        window.title("Master database - {} cases".format(len(self.master.cases)))
+        window.geometry("860x480")
+        tree = gui_common.make_table(
+            window,
+            [("case", "Case"), ("items", "Rubric items"), ("text", "Case text")],
+            widths={"case": 90, "items": 90, "text": 620},
+        )
+        ordered = sorted(
+            self.master.cases.values(), key=lambda c: (c["provider_number"], c["case_number"])
+        )
+        for case in ordered:
+            tree.insert("", "end", values=(case["case_id"], len(case["rubric"]), preview(case, 100)))
+        tree.master.pack(fill="both", expand=True, padx=8, pady=8)
+
+
+class _GuiModules:
+    def __init__(self, tk, messagebox):
+        self.tk = tk
+        self.messagebox = messagebox
 
 
 def main():
-    print("=" * 60)
-    print("LLM Medical Cases - Case Merger (for the PI)")
-    print("=" * 60)
+    import tkinter as tk
+    from tkinter import messagebox
+    import gui_common
+
+    root = gui_common.make_root("Case Merger (for the PI)", 940, 600)
     try:
         master = MasterStore.load_or_create(MASTER_FILENAME)
-    except (CaseStoreError, OSError) as e:
-        print("Error: {}".format(e))
-        prompt("Press Enter to close. ")
+    except (CaseStoreError, OSError) as error:
+        gui_common.show_error("Cannot open the master database", str(error))
+        root.destroy()
         return 1
-    if os.path.exists(MASTER_FILENAME):
-        print("Master file {}: {} case{} loaded.\n".format(
-            MASTER_FILENAME, len(master.cases), "" if len(master.cases) == 1 else "s"
-        ))
-    else:
-        print("No master file yet - {} will be created on the first merge.\n".format(
-            MASTER_FILENAME
-        ))
-
-    while True:
-        choice = prompt("[M]erge provider files  [L]ist the master  [Q]uit > ").strip().lower()
-        if choice == "q":
-            print("The master database is saved in {}.".format(MASTER_FILENAME))
-            prompt("Press Enter to close. ")
-            return 0
-        if choice == "m":
-            merge_files(master)
-        elif choice == "l":
-            list_master(master)
-        elif choice:
-            print("Please choose M, L, or Q.")
+    MergeApp(root, master, _GuiModules(tk, messagebox))
+    root.mainloop()
+    return 0
 
 
 if __name__ == "__main__":

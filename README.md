@@ -57,7 +57,8 @@ Used by the PI to run selected cases through selected LLMs.
 
 - **API models** (Anthropic Claude, OpenAI GPT, Google Gemini, xAI Grok) run
   unattended once an API key is entered in the in-program Settings menu.
-- **Browser models with no API** (OpenEvidence, UpToDate, Doximity GPT) are
+- **Browser models with no API** (OpenEvidence, UpToDate, Doximity GPT,
+  ChatGPT for Clinicians) are
   driven through a visible browser window with Playwright; answer text *and
   images* are captured, along with a full-page screenshot of every answer.
 - **Deep thinking, no memory.** Every model is asked to reason at length
@@ -170,104 +171,94 @@ version. The provider case file produced by Program 1 looks like:
 }
 ```
 
-All programs are fully menu-driven — no command-line options to remember.
-You just run the program and answer its questions.
+## Getting started on Microsoft Windows
 
-## Program 1 Usage (for providers)
+Every program is a normal **window-based Windows application** — no command
+line, no options to remember.
 
-Requires Python 3.8+ (standard library only — nothing to install).
+1. Install Python once from [python.org](https://www.python.org/downloads/)
+   (click "Install Now"; the defaults include everything these programs
+   need, including the window system).
+2. Put the program files in a folder, and **double-click the launcher** for
+   the program you need:
 
-```
-python3 case_editor.py
-```
+   | Double-click | Who uses it |
+   |---|---|
+   | `Case Editor.pyw` | each provider |
+   | `Merge Cases.pyw` | the PI |
+   | `Run LLMs.pyw` | the PI |
+   | `Build Scoring Package.pyw` | the PI |
+   | `Score Answers.pyw` | each scorer |
+   | `Rank LLMs.pyw` | the PI |
 
-On first run you are asked for your preassigned provider number, and the file
-`provider_NNN_cases.json` is created. On later runs the program finds that
-file in the same folder and loads it automatically (if several case files are
-present it shows a numbered list and asks which one to open). A menu offers:
+   The `.pyw` launchers open the window without a console behind it. All
+   data files are created in the same folder, so keep each person's
+   programs in one folder (providers only need the Case Editor files;
+   scorers only need `score_answers.py` next to their zip).
 
-- **N** — create a new case (enter case text, then rubric items one per line)
-- **L** — list all cases
-- **V** — view a case in full
-- **E** — edit a case (replace case text; add, edit, or remove rubric items)
-- **D** — delete a case
-- **Q** — quit (the file is saved after every change, so quitting is always safe)
+## Program 1 (for providers) — double-click `Case Editor.pyw`
 
-When your cases are ready, email your `provider_NNN_cases.json` file to the
-principal investigator.
+On first run a small dialog asks for your preassigned provider number and the
+file `provider_NNN_cases.json` is created; on later runs it is found and
+opened automatically. The window shows your case list on the left; on the
+right you type the case text and the rubric (**one rubric item per line**),
+then click **Save case**. New case / Delete case buttons are under the list,
+and the program warns before anything unsaved is lost. When your cases are
+ready, email your `provider_NNN_cases.json` file to the principal
+investigator.
 
-## Program 2 Usage (for the PI)
+## Program 2 (for the PI) — double-click `Merge Cases.pyw`
 
-Requires Python 3.8+ (standard library only). Copy the `provider_NNN_cases.json`
-files the providers emailed you into one folder and run the program there:
+Copy the `provider_NNN_cases.json` files the providers emailed you into the
+study folder first. The window lists the provider files it finds; select
+some (Ctrl-click) and click **Merge selected**, or just **Merge all**. The
+master database `master_cases.json` is created in the same folder and a log
+pane shows exactly what was added, updated, or kept. Merging the same file
+twice is safe. When a provider re-sends an updated file, a dialog shows both
+versions of each changed case and asks which to keep (noting which is
+newer); cases missing from the new file are kept unless you confirm their
+removal. **View the master database** shows everything in a table.
 
-```
-python3 merge_cases.py
-```
+## Program 3 (for the PI) — double-click `Run LLMs.pyw`
 
-The master database `master_cases.json` is created in the same folder on the
-first merge and reloaded on later runs. The menu offers:
+The window has four tabs. On **Run**: step 1, pick the cases (all / typed
+ranges like `003-001..003-020` / a saved set — and any selection can be saved
+under a name for reuse); step 2, tick the LLMs (each line shows whether it is
+ready and how many of the chosen cases it has already answered); step 3,
+click **Start the run**. Progress streams into the log pane; already-answered
+pairs are skipped automatically, previously failed pairs are retried if the
+checkbox is on, and **Stop after the current answer** stops cleanly (nothing
+is lost — every answer is saved the moment it arrives).
 
-- **M** — merge provider files: the program lists the provider files it finds
-  in the folder and you pick which to merge (e.g. `1,3`, or `A` for all)
-- **L** — list the master database, grouped by provider
-- **Q** — quit (the master is saved after every merge)
-
-Merging the same file twice is safe (already-merged cases are reported as
-unchanged). When a provider re-sends an updated file, the program shows both
-versions of each changed case and asks which to keep, suggesting the newer
-one; cases missing from the new file (deleted by the provider) are kept
-unless you confirm their removal.
-
-## Program 3 Usage (for the PI)
-
-Run it in the same folder as `master_cases.json`:
-
-```
-python3 run_llms.py
-```
-
-The menu offers **R**un, **C**ase sets, **A**nswers so far, **S**ettings, and
-**Q**uit. A run has three steps: choose the cases (all / typed IDs and ranges
-like `003-001..003-020` / one provider / a saved set — typed selections can be
-saved under a name for reuse), choose the LLMs (the list shows which are ready
-and how many of the chosen cases each has already answered), then confirm.
-Already-answered pairs are skipped automatically; previously failed pairs are
-offered for retry.
-
-**Settings** holds the API keys (typed with hidden input, shown last-4 only)
-and the site logins. `settings.json` is saved with private permissions —
-keep it out of email and version control.
-
-**One-time setup for the browser models:** Settings → "Browser automation
-setup" installs Playwright and a browser for it to drive (a few hundred MB,
-with your consent). Then use "Log in now" under each site: a browser window
-opens, you finish the login yourself — including any verification code or
-CAPTCHA, which the program never automates — and the login is remembered for
-future runs. During a browser run you should stay at the computer; if a site
-misbehaves, the program offers to retry, let you drive that case by hand
-(it still captures the text, images, and a screenshot), skip it, or set the
-site aside. If a site changes its design, a replacement `site_selectors.json`
-file placed next to the program fixes the automation without code changes.
+**Case sets** manages the saved selections. **Answers so far** is a table of
+every collected answer (double-click-free: select a row and click View).
+**Settings** holds the API keys (entered hidden, shown last-4 only), the site
+logins, a one-click **Browser automation setup** (installs Playwright with
+your consent — a few-hundred-MB one-time download), **Log in now** for each
+site (a real browser window opens; you complete the login including any
+verification code or CAPTCHA yourself — never automated — and it is
+remembered), and an **Options** dialog (timeouts, pacing, deep thinking, the
+fake test model). During the browser phase stay at the computer: if a site
+misbehaves, a dialog offers retry / do-it-by-hand (the program still captures
+text, images, and a screenshot) / skip / set the site aside. A replacement
+`site_selectors.json` next to the program fixes a site redesign without code
+changes.
 
 Please note: automated querying of subscription sites (OpenEvidence, UpToDate,
-Doximity) happens under your own accounts and is your responsibility under
-those services' terms.
+Doximity, ChatGPT for Clinicians) happens under your own accounts and is your responsibility under
+those services' terms. Keep `settings.json` private.
 
-## Program 4 Usage (for the PI)
+## Program 4 (for the PI) — double-click `Build Scoring Package.pyw`
 
-```
-python3 build_scoring_package.py
-```
-
-Choose the cases (from those that have answers) and the AIs to include —
-these choices are independent of how the answers were collected, so you can
-send different scorers different slices. The program checks coverage (cases
-missing an answer from some AI can be included as-is or excluded), then
-builds `scoring_packages/<name>.zip` — email that file to the scorer. The
-matching `<name>_KEY_DO_NOT_SEND.json` reveals which AI wrote each answer:
-it stays with you and is needed later by the ranker. **Never send the key
-file to a scorer.**
+Select the cases in the table (Select all, Ctrl-click, or type a range and
+click Apply), tick the AIs to include, name the package, and click **Build
+the package** — these choices are independent of how the answers were
+collected, so different scorers can get different slices. Coverage gaps
+raise a dialog (include as-is / exclude / cancel), and oversized packages
+offer to split into email-sized parts. Email `scoring_packages/<name>.zip`
+to the scorer. The matching `<name>_KEY_DO_NOT_SEND.json` reveals which AI
+wrote each answer: it stays with you and is needed later by the ranker.
+**Never send the key file to a scorer.**
 
 ## Program 5 Usage (for the scorer)
 
@@ -288,21 +279,17 @@ Stop anytime with S — everything you finish is saved to
 where you left off. **P** shows progress, **R** re-grades a single answer.
 When everything is graded, email the scores file back to the PI.
 
-## Program 6 Usage (for the PI)
+## Program 6 (for the PI) — double-click `Rank LLMs.pyw`
 
 Save the `scores_*.json` files the scorers emailed back into the study folder
-(the same one holding `scoring_packages/` with your key files) and run:
-
-```
-python3 rank_llms.py
-```
-
-The program lists what it found, joins each scores file to its key by
-`package_id` (warning about anything it cannot join), fits the ratings, and
-prints the ranking immediately. The menu then offers **L** (LLM rankings),
-**C** (case difficulty), **E** (export `ranking_results/llm_rankings.csv`,
-`case_difficulty.csv`, and `matches.csv`), and **Q**uit. Re-run it whenever
-another scores file arrives — it always refits from everything present.
+(the same one holding `scoring_packages/` with your key files). The window
+opens with the ranking already fitted: an **LLM rankings** tab (Elo, answers
+graded, average score, 2/1/0 counts, and the predicted chance of handling an
+average case well) and a **Case difficulty** tab (higher Elo = harder).
+Anything that could not be joined to a key is listed as a warning. **Export
+CSV files for analysis** writes `ranking_results/llm_rankings.csv`,
+`case_difficulty.csv`, and `matches.csv`. Reopen it whenever another scores
+file arrives — it always refits from everything present.
 
 ## Files created alongside the programs
 
@@ -324,3 +311,6 @@ another scores file arrives — it always refits from everything present.
 ```
 python3 -m unittest discover -p "test_*.py"
 ```
+
+(The data logic is fully covered by the tests; the windows were additionally
+exercised end-to-end under a virtual display during development.)
