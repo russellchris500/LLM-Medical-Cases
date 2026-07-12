@@ -222,6 +222,10 @@ def interactive_login(driver, page, site_settings, ui):
             "A browser window is open on {}. Please finish logging in there,\n"
             "including any verification code or \"I am not a robot\" check.\n"
             "If the site offers \"remember this device\", say yes.\n\n"
+            "TIP: if signing in with Google complains that the browser is not\n"
+            "safe, use the site's own email-and-password (or emailed code)\n"
+            "sign-in instead of the \"Continue with Google\" button - you only\n"
+            "need to do this once; the login is remembered afterwards.\n\n"
             "When you can see the normal question page, click Continue.".format(
                 driver.display_name
             ),

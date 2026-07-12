@@ -244,6 +244,14 @@ text, images, and a screenshot) / skip / set the site aside. A replacement
 `site_selectors.json` next to the program fixes a site redesign without code
 changes.
 
+**If Google sign-in says "this browser or app may not be secure":** Google
+sometimes refuses its sign-in inside an automated browser. The program
+minimizes this (it prefers your real installed Chrome or Edge and does not
+advertise automation), but if Google still refuses, simply use the site's own
+email-and-password or emailed-code sign-in instead of the "Continue with
+Google" button. It is a one-time step — the login is remembered in that
+site's browser profile afterwards.
+
 Please note: automated querying of subscription sites (OpenEvidence, UpToDate,
 Doximity, ChatGPT for Clinicians) happens under your own accounts and is your responsibility under
 those services' terms. Keep `settings.json` private.

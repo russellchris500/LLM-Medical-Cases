@@ -461,21 +461,48 @@ def make_driver(site_id, selectors=None):
 
 def open_site_context(playwright, site_id, headless=False):
     """A visible browser with a persistent per-site profile, so logins
-    (including remembered 2FA devices) survive between runs."""
+    (including remembered 2FA devices) survive between runs.
+
+    Google refuses OAuth sign-ins ("This browser or app may not be
+    secure") in browsers that advertise automation, so the automation
+    banner/flag is switched off and a real installed Chrome (or Edge,
+    which every Windows machine has) is preferred over the bundled
+    test browser."""
     user_data_dir = os.path.join(PROFILES_DIR, site_id)
     os.makedirs(user_data_dir, exist_ok=True)
     kwargs = {
         "headless": headless,
         "viewport": {"width": 1280, "height": 900},
         "permissions": ["clipboard-read", "clipboard-write"],
+        # Without these, Chromium announces itself as automated
+        # (navigator.webdriver + the "controlled by automated test
+        # software" bar), which trips Google's unsafe-browser block.
+        "ignore_default_args": ["--enable-automation"],
+        "args": [
+            "--disable-blink-features=AutomationControlled",
+            "--no-first-run",
+            "--no-default-browser-check",
+        ],
     }
+    context = None
+    for channel in ("chrome", "msedge"):
+        try:
+            context = playwright.chromium.launch_persistent_context(
+                user_data_dir, channel=channel, **kwargs
+            )
+            break
+        except Exception:
+            continue
+    if context is None:
+        context = playwright.chromium.launch_persistent_context(user_data_dir, **kwargs)
     try:
-        # A real Chrome install looks more human to bot defenses.
-        return playwright.chromium.launch_persistent_context(
-            user_data_dir, channel="chrome", **kwargs
+        # Belt and suspenders for pages that probe navigator.webdriver.
+        context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
         )
     except Exception:
-        return playwright.chromium.launch_persistent_context(user_data_dir, **kwargs)
+        pass
+    return context
 
 
 def copy_to_clipboard(page, text):
