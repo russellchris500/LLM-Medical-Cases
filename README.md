@@ -209,9 +209,12 @@ investigator.
 
 ## Program 2 (for the PI) — double-click `Merge Cases.pyw`
 
-Copy the `provider_NNN_cases.json` files the providers emailed you into the
-study folder first. The window lists the provider files it finds; select
-some (Ctrl-click) and click **Merge selected**, or just **Merge all**. The
+If the `provider_NNN_cases.json` files the providers emailed you are not
+already in the study folder, the program asks where they are when it starts
+(a normal folder-chooser box — your Downloads folder, for example), and a
+**Change folder...** button switches folders anytime. The window lists the
+provider files it finds there; select some (Ctrl-click) and click **Merge
+selected**, or just **Merge all**. The
 master database `master_cases.json` is created in the same folder and a log
 pane shows exactly what was added, updated, or kept. Merging the same file
 twice is safe. When a provider re-sends an updated file, a dialog shows both
@@ -287,8 +290,11 @@ email the scores file back to the PI.
 
 ## Program 6 (for the PI) — double-click `Rank LLMs.pyw`
 
-Save the `scores_*.json` files the scorers emailed back into the study folder
-(the same one holding `scoring_packages/` with your key files). The window
+When it starts, the program asks **where you saved the `scores_*.json`
+files the scorers emailed back** (a normal folder-chooser box; if they are
+already in the study folder, cancelling just uses that). Your key files are
+found automatically in the study folder's `scoring_packages/` — and in the
+chosen folder too, if you keep everything in one place. The window then
 opens with the ranking already fitted: an **LLM rankings** tab (Elo, answers
 graded, average score, 2/1/0 counts, and the predicted chance of handling an
 average case well) and a **Case difficulty** tab (higher Elo = harder).

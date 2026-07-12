@@ -173,17 +173,22 @@ def preview(case, limit=68):
     return flat if len(flat) <= limit else flat[: limit - 3] + "..."
 
 
-def find_provider_files():
+def find_provider_files(folder="."):
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return []
     return sorted(
-        name for name in os.listdir(".") if re.fullmatch(r"provider_\d{3,}_cases\.json", name)
+        name for name in names if re.fullmatch(r"provider_\d{3,}_cases\.json", name)
     )
 
 
 class MergeApp:
-    def __init__(self, root, master, gui):
+    def __init__(self, root, master, gui, files_folder="."):
         self.root = root
         self.master = master
         self.gui = gui
+        self.files_folder = files_folder
         tk = gui.tk
         self.summary = tk.Label(root, text="", anchor="w")
         self.summary.pack(fill="x", padx=8, pady=(8, 0))
@@ -192,14 +197,18 @@ class MergeApp:
         body.pack(fill="both", expand=True, padx=8, pady=8)
         left = tk.Frame(body)
         left.pack(side="left", fill="y")
-        tk.Label(left, text="Provider case files in this folder:", anchor="w").pack(fill="x")
+        self.folder_label = tk.Label(left, text="", anchor="w", wraplength=280, justify="left")
+        self.folder_label.pack(fill="x")
         self.file_list = tk.Listbox(left, selectmode="extended", width=36, exportselection=False)
         self.file_list.pack(fill="y", expand=True, pady=4)
         row = tk.Frame(left)
         row.pack(fill="x")
-        tk.Button(row, text="Refresh", command=self.refresh_files).pack(side="left")
-        tk.Button(row, text="Merge selected", command=self.merge_selected).pack(side="left", padx=4)
-        tk.Button(row, text="Merge all", command=self.merge_all).pack(side="left")
+        tk.Button(row, text="Change folder...", command=self.change_folder).pack(side="left")
+        tk.Button(row, text="Refresh", command=self.refresh_files).pack(side="left", padx=4)
+        row2 = tk.Frame(left)
+        row2.pack(fill="x", pady=(4, 0))
+        tk.Button(row2, text="Merge selected", command=self.merge_selected).pack(side="left")
+        tk.Button(row2, text="Merge all", command=self.merge_all).pack(side="left", padx=4)
         tk.Button(left, text="View the master database", command=self.view_master).pack(
             fill="x", pady=(8, 0)
         )
@@ -226,9 +235,29 @@ class MergeApp:
         )
 
     def refresh_files(self):
+        self.folder_label.configure(
+            text="Provider case files in:\n{}".format(os.path.abspath(self.files_folder))
+        )
         self.file_list.delete(0, "end")
-        for name in find_provider_files():
+        for name in find_provider_files(self.files_folder):
             self.file_list.insert("end", name)
+
+    def change_folder(self):
+        from tkinter import filedialog
+
+        folder = filedialog.askdirectory(
+            parent=self.root,
+            title="Where are the provider case files the providers emailed you?",
+            initialdir=os.path.abspath(self.files_folder),
+        )
+        if folder:
+            self.files_folder = folder
+            self.refresh_files()
+            if not find_provider_files(folder):
+                self.log.log(
+                    "No provider case files (provider_NNN_cases.json) in {} - "
+                    "save the emailed files there and click Refresh.".format(folder)
+                )
 
     def merge_selected(self):
         names = [self.file_list.get(i) for i in self.file_list.curselection()]
@@ -243,13 +272,13 @@ class MergeApp:
         self.merge_files(names)
 
     def merge_all(self):
-        names = find_provider_files()
+        names = find_provider_files(self.files_folder)
         if not names:
             self.gui.messagebox.showinfo(
                 "No files found",
-                "No provider case files (provider_NNN_cases.json) were found in "
-                "this folder. Copy the files the providers emailed you next to "
-                "this program, then click Refresh.",
+                "No provider case files (provider_NNN_cases.json) were found in\n"
+                "{}\n\nUse 'Change folder...' to point at the folder where you "
+                "saved the emailed files.".format(os.path.abspath(self.files_folder)),
                 parent=self.root,
             )
             return
@@ -293,7 +322,7 @@ class MergeApp:
         stores = []
         for name in names:
             try:
-                stores.append(CaseStore.load(name))
+                stores.append(CaseStore.load(os.path.join(self.files_folder, name)))
             except (CaseStoreError, OSError) as error:
                 self.gui.messagebox.showerror(
                     "Problem with {}".format(name),
@@ -358,17 +387,31 @@ class _GuiModules:
 
 def main():
     import tkinter as tk
-    from tkinter import messagebox
+    from tkinter import filedialog, messagebox
     import gui_common
 
-    root = gui_common.make_root("Case Merger (for the PI)", 940, 600)
+    root = gui_common.make_root("Case Merger (for the PI)", 960, 620)
     try:
         master = MasterStore.load_or_create(MASTER_FILENAME)
     except (CaseStoreError, OSError) as error:
         gui_common.show_error("Cannot open the master database", str(error))
         root.destroy()
         return 1
-    MergeApp(root, master, _GuiModules(tk, messagebox))
+    # The master database lives next to the programs; the emailed provider
+    # files can be anywhere - ask where, unless they are already here.
+    files_folder = "."
+    if not find_provider_files("."):
+        root.withdraw()
+        chosen = filedialog.askdirectory(
+            parent=root,
+            title="Where are the provider case files the providers emailed you? "
+            "(Cancel to choose later)",
+            initialdir=os.getcwd(),
+        )
+        if chosen:
+            files_folder = chosen
+        root.deiconify()
+    MergeApp(root, master, _GuiModules(tk, messagebox), files_folder=files_folder)
     root.mainloop()
     return 0
 

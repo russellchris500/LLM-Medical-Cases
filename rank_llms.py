@@ -141,11 +141,19 @@ def find_scores_files(folder="."):
     )
 
 
-def find_key_files():
+def find_key_files(extra_folders=()):
+    folders = [PACKAGES_DIR, "."]
+    for extra in extra_folders:
+        folders.extend([os.path.join(extra, PACKAGES_DIR), extra])
     found = []
-    for folder in (PACKAGES_DIR, "."):
+    seen = set()
+    for folder in folders:
         if not os.path.isdir(folder):
             continue
+        real = os.path.realpath(folder)
+        if real in seen:
+            continue
+        seen.add(real)
         for name in sorted(os.listdir(folder)):
             if KEY_FILE_RE.match(name):
                 found.append(os.path.join(folder, name))
@@ -330,22 +338,60 @@ def export_csv(matches, llm_ratings, case_ratings):
 # ---------- window interface ----------
 
 
+def choose_scores_folder(root, filedialog, messagebox):
+    """Ask where the scorers' returned scores files are; retry until a
+    folder containing at least one is chosen. Returns the folder or None."""
+    start_dir = os.getcwd()
+    while True:
+        folder = filedialog.askdirectory(
+            parent=root,
+            title="Where are the scores files the scorers emailed back? "
+            "Choose the folder containing scores_*.json",
+            initialdir=start_dir,
+        )
+        if not folder:
+            # Cancelled: fall back to the study folder when it has some.
+            if find_scores_files(start_dir):
+                return start_dir
+            messagebox.showinfo(
+                "No folder chosen",
+                "To rank the LLMs, start the program again and choose the "
+                "folder where you saved the scores files the scorers emailed "
+                "back (scores_*.json).",
+            )
+            return None
+        if find_scores_files(folder):
+            return folder
+        if not messagebox.askretrycancel(
+            "No scores files there",
+            "No scores files (scores_*.json) were found in:\n{}\n\nChoose "
+            "the folder where you saved the files the scorers emailed "
+            "back.".format(folder),
+        ):
+            return None
+        start_dir = folder
+
+
 def main():
     import tkinter as tk
-    from tkinter import messagebox
+    from tkinter import filedialog, messagebox
     import gui_common
 
     root = gui_common.make_root("LLM Ranker (for the PI)", 1000, 640)
     root.withdraw()
 
-    scores_files = load_scores(find_scores_files())
-    keys = load_keys(find_key_files())
+    scores_folder = choose_scores_folder(root, filedialog, messagebox)
+    if scores_folder is None:
+        root.destroy()
+        return 1
+    scores_files = load_scores(
+        [os.path.join(scores_folder, name) for name in find_scores_files(scores_folder)]
+    )
+    keys = load_keys(find_key_files(extra_folders=[scores_folder]))
     if not scores_files:
         gui_common.show_error(
             "No scores files",
-            "No scores files (scores_*.json) were found in this folder.\n\n"
-            "Save the files the scorers emailed back next to this program and "
-            "start it again.",
+            "The scores files in {} could not be read.".format(scores_folder),
         )
         root.destroy()
         return 1
