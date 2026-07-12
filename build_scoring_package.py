@@ -93,7 +93,11 @@ def blind_cases(package_cases, answers_by_case):
         key[case_id] = {}
         for label, record in zip(labels, records):
             key[case_id][label] = {
+                # The full scored identity (LLM + model name) and its parts.
                 "model_id": record["model_id"],
+                "llm_id": record.get("llm_id", record["model_id"]),
+                "model_name": record.get("model_name", ""),
+                "display_name": record.get("model_display_name", record["model_id"]),
                 "model_reported": record.get("model_reported", ""),
             }
             entry_answers.append(
