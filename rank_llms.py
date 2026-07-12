@@ -240,6 +240,7 @@ def build_matches(scores_files, keys):
             matches.append(
                 {
                     "model_id": entry.get("model_id", "unknown"),
+                    "display": entry.get("display_name", ""),
                     "case_id": case_id,
                     "score": score,
                     "result": RESULT_FOR_SCORE[score],
@@ -248,6 +249,20 @@ def build_matches(scores_files, keys):
                 }
             )
     return matches, warnings
+
+
+def display_map(matches):
+    """model_id -> friendly name: what the key files recorded (LLM plus
+    model name), falling back to the runner's registries for old data."""
+    names = display_names()
+    result = {}
+    for match in matches:
+        if match.get("display"):
+            result.setdefault(match["model_id"], match["display"])
+    for match in matches:
+        model_id = match["model_id"]
+        result.setdefault(model_id, names.get(model_id, model_id))
+    return result
 
 
 def display_names():
@@ -287,7 +302,7 @@ def summarize(matches):
 
 def export_csv(matches, llm_ratings, case_ratings):
     os.makedirs(RESULTS_DIR, exist_ok=True)
-    names = display_names()
+    names = display_map(matches)
     per_model = summarize(matches)
 
     rankings_path = os.path.join(RESULTS_DIR, "llm_rankings.csv")
@@ -415,7 +430,7 @@ def main():
         return 1
 
     llm_ratings, case_ratings, iterations = fit_ratings(matches)
-    names = display_names()
+    names = display_map(matches)
     per_model = summarize(matches)
 
     llms = {m["model_id"] for m in matches}

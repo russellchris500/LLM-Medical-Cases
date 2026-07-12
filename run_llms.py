@@ -35,11 +35,12 @@ from eval_common import (
     SelectionError,
     SettingsStore,
     case_hash,
+    model_slug,
     parse_selection,
     sort_case_ids,
     split_case_id,
 )
-from llm_api import API_MODEL_IDS, API_REGISTRY, ApiCallError, ModelAbort, call_api_model
+from llm_api import API_MODEL_IDS, API_REGISTRY, ApiCallError, ModelAbort, call_api_model, resolve_model
 import llm_browser
 from llm_browser import (
     BROWSER_MODEL_IDS,
@@ -68,27 +69,50 @@ def render_prompt(case):
 
 
 def model_catalog(settings):
-    """Every model the runner knows, in menu order."""
+    """Every model the runner knows, in menu order.
+
+    Each entry carries the MODEL NAME that, together with the LLM, forms
+    the unique scored identity (variant_id): the same LLM running two
+    different model names is scored and ranked as two separate models.
+    API models resolve their name from Settings (or the built-in default);
+    browser sites have no API to ask, so the user types the model name in
+    Settings and must do so before the site can be run.
+    """
     catalog = []
     for model_id in API_MODEL_IDS:
+        model_name = resolve_model(model_id, settings.api_model(model_id))
         catalog.append(
             {
                 "model_id": model_id,
                 "display_name": API_REGISTRY[model_id]["display_name"],
                 "kind": "api",
+                "model_name": model_name,
             }
         )
     for site_id in BROWSER_MODEL_IDS:
+        model_name = (settings.browser_model(site_id).get("model") or "").strip()
         catalog.append(
             {
                 "model_id": site_id,
                 "display_name": SITE_INFO[site_id]["display_name"],
                 "kind": "browser",
+                "model_name": model_name,
             }
         )
     if settings.option("enable_test_model"):
         catalog.append(
-            {"model_id": TEST_MODEL_ID, "display_name": "Test model (fake)", "kind": "test"}
+            {
+                "model_id": TEST_MODEL_ID,
+                "display_name": "Test model (fake)",
+                "kind": "test",
+                "model_name": "test-model-1",
+            }
+        )
+    for entry in catalog:
+        entry["variant_id"] = model_slug(entry["model_id"], entry["model_name"])
+        entry["scored_as"] = (
+            "{} ({})".format(entry["display_name"], entry["model_name"])
+            if entry["model_name"] else entry["display_name"]
         )
     return catalog
 
@@ -96,9 +120,12 @@ def model_catalog(settings):
 def new_record(case, model, prompt_sent, deep_thinking=True):
     return {
         "case_id": case["case_id"],
-        "model_id": model["model_id"],
+        # model_id is the full scored identity: LLM + model name.
+        "model_id": model["variant_id"],
+        "llm_id": model["model_id"],
+        "model_name": model["model_name"],
         "model_kind": model["kind"],
-        "model_display_name": model["display_name"],
+        "model_display_name": model["scored_as"],
         "deep_thinking": deep_thinking,
         "model_requested": "",
         "model_reported": "",
@@ -120,15 +147,15 @@ def new_record(case, model, prompt_sent, deep_thinking=True):
 
 def build_worklist(master, answers, case_ids, models):
     """Split the requested (case, model) pairs by what still needs asking."""
-    todo = {model["model_id"]: [] for model in models}
+    todo = {model["variant_id"]: [] for model in models}
     skipped = 0
     failed_pairs = []
     changed_pairs = []
     for model in models:
         for case_id in case_ids:
-            existing = answers.get(case_id, model["model_id"])
+            existing = answers.get(case_id, model["variant_id"])
             if existing is None:
-                todo[model["model_id"]].append(case_id)
+                todo[model["variant_id"]].append(case_id)
             elif existing.get("status") in OK_STATUSES:
                 if existing.get("case_sha256") != case_hash(master.cases[case_id]):
                     changed_pairs.append((case_id, model))
@@ -157,15 +184,15 @@ def run_test_model(case):
 
 
 def run_api_phase(master, answers, settings, models, todo, ui):
-    api_models = [m for m in models if m["kind"] in ("api", "test") and todo[m["model_id"]]]
+    api_models = [m for m in models if m["kind"] in ("api", "test") and todo[m["variant_id"]]]
     if not api_models:
         return
-    total = sum(len(todo[m["model_id"]]) for m in api_models)
+    total = sum(len(todo[m["variant_id"]]) for m in api_models)
     ui.log("API models ({} answers to collect):".format(total))
     done = 0
     options = settings.data["options"]
     for model in api_models:
-        for case_id in todo[model["model_id"]]:
+        for case_id in todo[model["variant_id"]]:
             if ui.stop_requested:
                 raise AbandonRun()
             done += 1
@@ -191,7 +218,7 @@ def run_api_phase(master, answers, settings, models, todo, ui):
                 record["finished_at"] = now_iso()
                 answers.upsert(record)
                 ui.log("  [{}/{}] {} x {} - ok ({:.1f}s)".format(
-                    done, total, case_id, model["display_name"],
+                    done, total, case_id, model["scored_as"],
                     time.monotonic() - started,
                 ))
             except ApiCallError as error:
@@ -315,13 +342,13 @@ def run_browser_site(master, answers, settings, model, case_ids, ui):
                     raise AbandonRun()
                 case = master.cases[case_id]
                 prompt_text = render_prompt(case)
-                basename = answers.image_basename(case_id, site_id)
+                basename = answers.image_basename(case_id, model["variant_id"])
                 record = new_record(case, model, prompt_text, deep_thinking=True)
                 started = time.monotonic()
                 ui.log("  [{}/{}] {} x {}...".format(
                     index, len(case_ids), case_id, model["display_name"]
                 ))
-                answers.clear_images(case_id, site_id)
+                answers.clear_images(case_id, model["variant_id"])
                 result = None
                 mode_manual = all_manual
                 while result is None:
@@ -369,7 +396,7 @@ def run_browser_site(master, answers, settings, model, case_ids, ui):
                     continue
                 record["response_text"] = result.text
                 record["images"] = [p.replace(os.sep, "/") for p in result.image_paths]
-                record["model_requested"] = model["display_name"]
+                record["model_requested"] = model["model_name"] or model["display_name"]
                 record["model_reported"] = result.model_reported
                 record["status"] = "ok_manual" if result.manual else "ok"
                 record["finished_at"] = now_iso()
@@ -393,11 +420,11 @@ def run_browser_site(master, answers, settings, model, case_ids, ui):
 def run_everything(master, answers, settings, models, todo, ui):
     try:
         run_api_phase(master, answers, settings, models, todo, ui)
-        browser_models = [m for m in models if m["kind"] == "browser" and todo[m["model_id"]]]
+        browser_models = [m for m in models if m["kind"] == "browser" and todo[m["variant_id"]]]
         for model in browser_models:
             if ui.stop_requested:
                 raise AbandonRun()
-            run_browser_site(master, answers, settings, model, todo[model["model_id"]], ui)
+            run_browser_site(master, answers, settings, model, todo[model["variant_id"]], ui)
     except AbandonRun:
         ui.log("Stopped. Everything answered so far is saved; run again to continue.")
     summarize_run(answers, sorted({c for ids in todo.values() for c in ids}), models, ui)
@@ -408,7 +435,7 @@ def summarize_run(answers, case_ids, models, ui):
     failures = []
     for model in models:
         for case_id in case_ids:
-            record = answers.get(case_id, model["model_id"])
+            record = answers.get(case_id, model["variant_id"])
             if record is None:
                 missing += 1
             elif record["status"] == "ok":
@@ -584,7 +611,9 @@ class RunnerApp:
             key = self.settings.api_model(model["model_id"]).get("api_key", "")
             status = "API, key set" if key.strip() else "API, NO KEY - set it in Settings"
         elif model["kind"] == "browser":
-            if not llm_browser.PLAYWRIGHT_AVAILABLE:
+            if not model["model_name"]:
+                status = "browser, MODEL NAME NEEDED - set it in Settings"
+            elif not llm_browser.PLAYWRIGHT_AVAILABLE:
                 status = "browser, needs one-time setup in Settings"
             else:
                 last = self.settings.browser_model(model["model_id"]).get("last_login_ok")
@@ -594,7 +623,7 @@ class RunnerApp:
         if self.selected_cases:
             answered = sum(
                 1 for c in self.selected_cases
-                if (self.answers.get(c, model["model_id"]) or {}).get("status") in OK_STATUSES
+                if (self.answers.get(c, model["variant_id"]) or {}).get("status") in OK_STATUSES
             )
             status += "; answered {}/{}".format(answered, len(self.selected_cases))
         return status
@@ -668,6 +697,12 @@ class RunnerApp:
                 self.run_log.log(
                     "Skipping {}: no API key (see Settings).".format(model["display_name"])
                 )
+            elif model["kind"] == "browser" and not model["model_name"]:
+                self.run_log.log(
+                    "Skipping {}: set its model name in Settings first (which "
+                    "model the site runs, e.g. 'GPT-5' - the LLM plus the model "
+                    "name is what gets scored).".format(model["display_name"])
+                )
             elif model["kind"] == "browser" and not llm_browser.PLAYWRIGHT_AVAILABLE:
                 self.run_log.log(
                     "Skipping {}: browser automation is not set up yet (see "
@@ -701,15 +736,15 @@ class RunnerApp:
         )
         if failed_pairs and self.retry_failed.get():
             for case_id, model in failed_pairs:
-                todo[model["model_id"]].append(case_id)
+                todo[model["variant_id"]].append(case_id)
         if changed_pairs and self.reask_changed.get():
             for case_id, model in changed_pairs:
-                todo[model["model_id"]].append(case_id)
+                todo[model["variant_id"]].append(case_id)
         for model_id in todo:
             todo[model_id] = sort_case_ids(set(todo[model_id]))
-        api_count = sum(len(todo[m["model_id"]]) for m in models if m["kind"] in ("api", "test"))
-        browser_models = [m for m in models if m["kind"] == "browser" and todo[m["model_id"]]]
-        browser_count = sum(len(todo[m["model_id"]]) for m in browser_models)
+        api_count = sum(len(todo[m["variant_id"]]) for m in models if m["kind"] in ("api", "test"))
+        browser_models = [m for m in models if m["kind"] == "browser" and todo[m["variant_id"]]]
+        browser_count = sum(len(todo[m["variant_id"]]) for m in browser_models)
         if api_count + browser_count == 0:
             self.gui.messagebox.showinfo(
                 "Nothing to do",
@@ -853,7 +888,7 @@ class RunnerApp:
         self.answers_tree.master.pack(fill="both", expand=True, pady=6)
 
     def refresh_answers_tab(self):
-        names = {m["model_id"]: m["display_name"] for m in model_catalog(self.settings)}
+        names = {m["variant_id"]: m["scored_as"] for m in model_catalog(self.settings)}
         tree = self.answers_tree
         for item in tree.get_children():
             tree.delete(item)
@@ -864,7 +899,7 @@ class RunnerApp:
         for (case_id, model_id), record in ordered:
             tree.insert("", "end", iid="{}|{}".format(case_id, model_id), values=(
                 case_id,
-                names.get(model_id, model_id),
+                record.get("model_display_name") or names.get(model_id, model_id),
                 record.get("status"),
                 len(record.get("images", [])),
                 (record.get("started_at") or "")[:16].replace("T", " "),
@@ -962,23 +997,30 @@ class RunnerApp:
             entry = self.settings.browser_model(site_id)
             tk.Label(holder, text=SITE_INFO[site_id]["display_name"], width=18,
                      anchor="w").grid(row=row_index, column=0, sticky="w")
+            model_name = (entry.get("model") or "").strip()
             tk.Label(
                 holder,
-                text="user: " + ((entry.get("username") or "not set")[:18]),
-                width=22, anchor="w",
-            ).grid(row=row_index, column=1, columnspan=2, sticky="w")
+                text="model: " + (model_name or "NOT SET"),
+                width=24, anchor="w",
+                fg="black" if model_name else "red",
+            ).grid(row=row_index, column=1, sticky="w")
+            tk.Button(
+                holder, text="Set model name",
+                command=lambda s=site_id: self.set_site_model_name(s),
+            ).grid(row=row_index, column=2, padx=2)
+            tk.Label(
+                holder,
+                text="user: {}; login: {}".format(
+                    (entry.get("username") or "not set")[:16],
+                    "verified " + entry["last_login_ok"][:10]
+                    if entry.get("last_login_ok") else "never",
+                ),
+                width=34, anchor="w",
+            ).grid(row=row_index, column=3, sticky="w")
             tk.Button(
                 holder, text="Set login details",
                 command=lambda s=site_id: self.set_site_login(s),
-            ).grid(row=row_index, column=3, sticky="w", padx=2)
-            tk.Label(
-                holder,
-                text="login: " + (
-                    "verified " + entry["last_login_ok"][:10]
-                    if entry.get("last_login_ok") else "never"
-                ),
-                width=22, anchor="w",
-            ).grid(row=row_index, column=4, sticky="w")
+            ).grid(row=row_index, column=4, sticky="w", padx=2)
             tk.Button(
                 holder, text="Log in now",
                 command=lambda s=site_id: self.login_now(s),
@@ -1015,7 +1057,9 @@ class RunnerApp:
         registry = API_REGISTRY[model_id]
         value = self.gui.simpledialog.askstring(
             "Model name",
-            "Model name for {} (leave empty for the default, {}):".format(
+            "Model name for {} (leave empty for the default, {}).\n\nThe LLM "
+            "plus this model name is what gets scored and ranked - changing "
+            "it starts a separate scoring identity.".format(
                 registry["display_name"], registry["default_model"]
             ),
             parent=self.root,
@@ -1051,6 +1095,24 @@ class RunnerApp:
                 )
 
         self.settings_task.start(work, on_done=done)
+
+    def set_site_model_name(self, site_id):
+        display = SITE_INFO[site_id]["display_name"]
+        entry = self.settings.browser_model(site_id)
+        value = self.gui.simpledialog.askstring(
+            "Model name",
+            "Which model does {} run? This name, together with the LLM, is\n"
+            "what gets scored and ranked (e.g. 'GPT-5', 'OpenEvidence "
+            "2026-07').\nChanging it later starts a separate scoring "
+            "identity.".format(display),
+            parent=self.root, initialvalue=entry.get("model", ""),
+        )
+        if value is None:
+            return
+        entry["model"] = value.strip()
+        self.settings.save()
+        self.refresh_settings_rows()
+        self.refresh_model_checkboxes()
 
     def set_site_login(self, site_id):
         display = SITE_INFO[site_id]["display_name"]

@@ -62,6 +62,15 @@ def sort_case_ids(case_ids):
     return sorted(case_ids, key=split_case_id)
 
 
+def model_slug(llm_id, model_name):
+    """The unique, filesystem-safe identity of one scored model:
+    the LLM plus the specific model name running on it. Two model names on
+    the same LLM (e.g. claude-opus-4-8 vs a newer Claude) are scored and
+    ranked as completely separate models."""
+    clean = re.sub(r"[^a-z0-9.]+", "-", (model_name or "").strip().lower()).strip("-.")
+    return "{}@{}".format(llm_id, clean) if clean else llm_id
+
+
 # ---------- case-selection expressions ----------
 #
 # Comma-separated tokens, each one of:
@@ -281,10 +290,10 @@ DEFAULT_SETTINGS = {
         "grok": {"api_key": "", "model": ""},
     },
     "browser_models": {
-        "openevidence": {"username": "", "password": "", "last_login_ok": None},
-        "uptodate": {"username": "", "password": "", "last_login_ok": None},
-        "doximity": {"username": "", "password": "", "last_login_ok": None},
-        "chatgptclinicians": {"username": "", "password": "", "last_login_ok": None},
+        "openevidence": {"username": "", "password": "", "model": "", "last_login_ok": None},
+        "uptodate": {"username": "", "password": "", "model": "", "last_login_ok": None},
+        "doximity": {"username": "", "password": "", "model": "", "last_login_ok": None},
+        "chatgptclinicians": {"username": "", "password": "", "model": "", "last_login_ok": None},
     },
     "options": {
         "deep_thinking": True,
@@ -336,7 +345,7 @@ class SettingsStore:
 
     def browser_model(self, site_id):
         return self.data["browser_models"].setdefault(
-            site_id, {"username": "", "password": "", "last_login_ok": None}
+            site_id, {"username": "", "password": "", "model": "", "last_login_ok": None}
         )
 
     def option(self, name):

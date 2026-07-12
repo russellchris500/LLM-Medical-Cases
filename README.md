@@ -64,6 +64,14 @@ Used by the PI to run selected cases through selected LLMs.
   (downloaded through the site's own logged-in session; an element
   screenshot is used only if a download is impossible), plus a full-page
   screenshot of every answer as an audit trail.
+- **Every scored model is an (LLM, model name) pair.** API models take
+  their model name from Settings (or the built-in default); for the browser
+  sites you type the model name in Settings — and must, before the site can
+  run (e.g. "GPT-5" for ChatGPT for Clinicians). Answers, blinded packages,
+  and rankings all key on the pair, so Claude running `claude-opus-4-8` and
+  Claude running a newer model are collected, scored, and ranked as two
+  completely separate models. Changing the model name in Settings starts a
+  fresh identity; the earlier answers stay under the old one.
 - **Deep thinking, no memory.** Every model is asked to reason at length
   before answering (Claude extended thinking, GPT high reasoning effort,
   Gemini dynamic thinking; Grok 4 always reasons), and every case is a
@@ -125,7 +133,9 @@ Used by the scorer (a provider) to grade the blinded answers in a package.
 
 Used by the PI, after scorers email back their `scores_*.json` files, to rank
 the LLMs with an **Elo-type rating in which every LLM *and* every case has a
-rating**.
+rating**. A "model" here is an (LLM, model name) pair — two model names on
+the same LLM are ranked as separate entries, labeled with both (e.g.
+"Anthropic Claude (claude-opus-4-8)").
 
 - Every graded answer is one match between an LLM and a case: a score of
   **2 is a win** for the LLM, **1 is a draw**, and **0 is a loss** (the case
