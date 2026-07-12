@@ -85,16 +85,24 @@ selected when the answers were collected.
   and when the case wording changed after an answer was collected.
 - Offers to split packages larger than 20 MB into email-sized parts.
 
-### Program 5 — Answer Scorer (`score_answers.py`) — planned
+### Program 5 — Answer Scorer (`score_answers.py`) ✅ implemented
 
 Used by the scorer (a provider) to grade the blinded answers in a package.
 
 - Reads the zip from Program 4 directly; shows each answer beside its case
-  text and rubric, still blinded.
-- For each rubric item the scorer marks met / not met; a case answer is
-  correct only if every rubric item is met.
-- Output: `scores.json` — per (case ID, label, rubric item) judgments, emailed
-  back to the PI, who joins them to models using the package's key file.
+  text and rubric, still blinded. Answer images are pulled out of the zip
+  and can be opened in the computer's normal image viewer.
+- For each rubric item the scorer marks met / not met (y/n); a case answer
+  is **correct only if every rubric item is met** (computed automatically).
+  An optional comment can be attached to any answer.
+- Grades are saved after every answer, so the scorer can stop anytime and
+  continue later; answers can also be re-graded (previous judgments become
+  the defaults).
+- The file is fully self-contained — the PI can email a scorer just the zip
+  and this one program file, nothing else.
+- Output: `scores_<package>.json` — per (case ID, label, rubric item)
+  judgments plus the scorer's name, emailed back to the PI, who joins them
+  to models using the package's key file (matched by `package_id`).
 
 ### Program 6 — LLM Ranker (`rank_llms.py`) — planned
 
@@ -231,6 +239,23 @@ matching `<name>_KEY_DO_NOT_SEND.json` reveals which AI wrote each answer:
 it stays with you and is needed later by the ranker. **Never send the key
 file to a scorer.**
 
+## Program 5 Usage (for the scorer)
+
+Save the zip you were emailed and `score_answers.py` into one folder (nothing
+else is needed — the program is self-contained) and run:
+
+```
+python3 score_answers.py
+```
+
+The program finds the zip by itself, asks for your name or initials, and
+walks you through every ungraded answer: the case text, the answer (with any
+images, which it can open for you), and the rubric one item at a time (y/n).
+Stop anytime with S — everything you finish is saved to
+`scores_<package>.json` immediately, and running the program again continues
+where you left off. **P** shows progress, **R** re-grades a single answer.
+When everything is graded, email the scores file back to the PI.
+
 ## Files created alongside the programs
 
 | File / folder | Created by | Notes |
@@ -242,6 +267,7 @@ file to a scorer.**
 | `answers.json`, `answer_images/` | Program 3 | collected answers |
 | `browser_profiles/` | Program 3 | remembered site logins |
 | `scoring_packages/` | Program 4 | zips to email + key files to keep |
+| `scores_<package>.json` | Program 5 | the scorer's grades — email back to the PI |
 
 ## Tests
 

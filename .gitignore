@@ -9,3 +9,5 @@ answer_images/
 browser_profiles/
 scoring_packages/
 site_selectors.json
+scores_*.json
+*_images/
