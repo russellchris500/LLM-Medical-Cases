@@ -288,9 +288,22 @@ class DriverTests(unittest.TestCase):
             self.assertEqual(ctx.exception.step, "extraction")
             self.assertTrue(os.path.exists(os.path.join(tmp, "x_page.png")))
 
+    def test_gptoss_picks_120b_but_never_download_commands(self):
+        driver = make_driver("gptoss")
+        picker = FakeElement(text="gpt-oss-120b")
+        other = FakeElement(text="gpt-oss-20b")
+        download = FakeElement(text="ollama run gpt-oss:120b")
+        page = FakePage({"button, [role='option'], [role='tab'], label": [other, download, picker]})
+        driver.start_new_question(page)
+        self.assertEqual(page.goto_urls, ["https://gpt-oss.com/"])
+        self.assertTrue(picker.clicked)
+        self.assertFalse(other.clicked)
+        self.assertFalse(download.clicked)
+
     def test_all_sites_have_drivers_and_selectors(self):
         from llm_browser import BROWSER_MODEL_IDS
-        for site_id in ("chatgptclinicians", "amboss", "clinicalkeyai", "dynamed", "glasshealth"):
+        for site_id in ("chatgptclinicians", "amboss", "clinicalkeyai", "dynamed",
+                        "glasshealth", "gptoss"):
             self.assertIn(site_id, BROWSER_MODEL_IDS)
         for site_id in BROWSER_MODEL_IDS:
             driver = make_driver(site_id)

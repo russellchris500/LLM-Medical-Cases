@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Browser automation for the healthcare LLM sites that have no API
 (OpenEvidence, UpToDate, Doximity GPT, ChatGPT for Clinicians, AMBOSS,
-ClinicalKey AI, DynaMed, Glass Health), used by Program 3 (run_llms.py).
+ClinicalKey AI, DynaMed, Glass Health, the GPT-OSS playground), used by
+Program 3 (run_llms.py).
 
 Design notes:
 - Playwright is imported lazily; every other part of the runner works
@@ -47,6 +48,7 @@ BROWSER_MODEL_IDS = [
     "clinicalkeyai",
     "dynamed",
     "glasshealth",
+    "gptoss",
 ]
 
 # Ordered fallback lists: each selector is tried in turn until one matches.
@@ -266,6 +268,34 @@ DEFAULT_SELECTORS = {
         "password_field": ["input[type='password']"],
         "new_chat": ["[aria-label*='new chat' i]", "[aria-label*='new question' i]", "[data-testid*='new-chat' i]"],
     },
+    "gptoss": {
+        "question_box": [
+            "textarea",
+            "[contenteditable='true']",
+            "input[type='text']",
+        ],
+        "submit_button": [
+            "button[type='submit']",
+            "[aria-label*='send' i]",
+            "[data-testid*='send' i]",
+        ],
+        "answer_container": [
+            "main [class*='answer' i]",
+            "main [class*='response' i]",
+            "main [class*='message' i]",
+            "main article",
+            "main",
+            "body",
+        ],
+        # The playground has no accounts at all, so no login form ever
+        # appears and the site counts as logged in whenever the question
+        # box is on screen.
+        "login_form": ["input[type='password']"],
+        "answer_images": ["img"],
+        "username_field": ["input[type='email']"],
+        "password_field": ["input[type='password']"],
+        "new_chat": ["[aria-label*='new chat' i]", "[data-testid*='new-chat' i]", "a[href='/']"],
+    },
 }
 
 SITE_INFO = {
@@ -308,6 +338,11 @@ SITE_INFO = {
         "display_name": "Glass Health",
         "home_url": "https://glass.health/",
         "login_url": "https://glass.health/login",
+    },
+    "gptoss": {
+        "display_name": "GPT-OSS Playground",
+        "home_url": "https://gpt-oss.com/",
+        "login_url": "https://gpt-oss.com/",
     },
 }
 
@@ -718,6 +753,31 @@ class GlassHealthDriver(SiteDriver):
     site_id = "glasshealth"
 
 
+class GptOssDriver(SiteDriver):
+    site_id = "gptoss"
+
+    def start_new_question(self, page):
+        """The playground offers gpt-oss-120b and gpt-oss-20b; the study
+        wants 120b, so any visible 120b choice is clicked after loading a
+        fresh page (the picker may already remember the last choice)."""
+        super().start_new_question(page)
+        # Only exact matches on real controls are clicked - the page also
+        # shows download commands mentioning 120b that must not be touched.
+        try:
+            for element in page.query_selector_all("button, [role='option'], [role='tab'], label"):
+                try:
+                    if not element.is_visible():
+                        continue
+                    text = (element.inner_text() or "").strip().lower()
+                    if text in ("gpt-oss-120b", "120b"):
+                        element.click()
+                        break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+
 DRIVER_CLASSES = {
     "openevidence": OpenEvidenceDriver,
     "uptodate": UpToDateDriver,
@@ -727,6 +787,7 @@ DRIVER_CLASSES = {
     "clinicalkeyai": ClinicalKeyAIDriver,
     "dynamed": DynaMedDriver,
     "glasshealth": GlassHealthDriver,
+    "gptoss": GptOssDriver,
 }
 
 

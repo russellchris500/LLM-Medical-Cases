@@ -298,6 +298,9 @@ DEFAULT_SETTINGS = {
         "clinicalkeyai": {"username": "", "password": "", "model": "", "last_login_ok": None},
         "dynamed": {"username": "", "password": "", "model": "", "last_login_ok": None},
         "glasshealth": {"username": "", "password": "", "model": "", "last_login_ok": None},
+        # The GPT-OSS playground needs no account, and the model it serves
+        # is known, so the model name is pre-filled (still editable).
+        "gptoss": {"username": "", "password": "", "model": "gpt-oss-120b", "last_login_ok": None},
     },
     "options": {
         "deep_thinking": True,

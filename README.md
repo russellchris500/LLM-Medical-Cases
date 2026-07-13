@@ -58,7 +58,9 @@ Used by the PI to run selected cases through selected LLMs.
 - **API models** (Anthropic Claude, OpenAI GPT, Google Gemini, xAI Grok) run
   unattended once an API key is entered in the in-program Settings menu.
 - **Browser models with no API** (OpenEvidence, UpToDate, Doximity GPT,
-  ChatGPT for Clinicians, AMBOSS, ClinicalKey AI, DynaMed, Glass Health) are
+  ChatGPT for Clinicians, AMBOSS, ClinicalKey AI, DynaMed, Glass Health, and
+  the free no-login GPT-OSS playground at gpt-oss.com, pre-set to
+  gpt-oss-120b) are
   driven through a visible browser window with Playwright; answer text is
   captured together with the **actual image files** in the answer
   (downloaded through the site's own logged-in session; an element
@@ -271,9 +273,9 @@ email-and-password or emailed-code sign-in instead of the "Continue with
 Google" button. It is a one-time step — the login is remembered in that
 site's browser profile afterwards.
 
-Please note: automated querying of subscription sites (OpenEvidence, UpToDate,
+Please note: automated querying of the LLM sites (OpenEvidence, UpToDate,
 Doximity, ChatGPT for Clinicians, AMBOSS, ClinicalKey AI, DynaMed, Glass
-Health) happens under your own accounts and is your responsibility under
+Health, gpt-oss.com) happens under your own accounts and is your responsibility under
 those services' terms. Keep `settings.json` private.
 
 ## Program 4 (for the PI) — double-click `Build Scoring Package.pyw`
