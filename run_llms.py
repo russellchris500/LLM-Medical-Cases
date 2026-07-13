@@ -240,6 +240,7 @@ def interactive_login(driver, page, site_settings, ui):
         page.goto(driver.login_url, wait_until="domcontentloaded")
     except Exception:
         pass
+    driver.wait_until_ready(page)
     driver.autofill_login(
         page, site_settings.get("username", ""), site_settings.get("password", "")
     )

@@ -272,7 +272,9 @@ DEFAULT_SELECTORS = {
         "question_box": [
             "textarea",
             "[contenteditable='true']",
+            "[role='textbox']",
             "input[type='text']",
+            "input:not([type])",
         ],
         "submit_button": [
             "button[type='submit']",
@@ -455,6 +457,27 @@ class SiteDriver:
         self.login_url = info["login_url"]
         all_selectors = selectors or load_selectors()
         self.selectors = all_selectors[self.site_id]
+        # Modern sites draw their page with JavaScript well after the
+        # navigation itself "finishes"; how long to keep looking for the
+        # page content before concluding it isn't there.
+        self.ready_timeout_s = 25
+        self.ready_poll_s = 0.5
+
+    def wait_until_ready(self, page, sleep=time.sleep, clock=time.monotonic):
+        """Wait until the page has actually drawn a question box or a login
+        form. On sites rendered entirely with JavaScript (gpt-oss.com,
+        chatgpt.com), the page is still blank at the moment navigation
+        completes - checking right away sees nothing and wrongly concludes
+        the user is not logged in."""
+        start = clock()
+        while True:
+            if find_first(page, self.selectors["question_box"]) is not None:
+                return True
+            if find_first(page, self.selectors["login_form"]) is not None:
+                return True
+            if clock() - start >= self.ready_timeout_s:
+                return False
+            sleep(self.ready_poll_s)
 
     def model_reported(self):
         return "{} (web interface, accessed {})".format(
@@ -463,8 +486,10 @@ class SiteDriver:
 
     # ---- login ----
 
-    def is_logged_in(self, page):
-        """True when the question box is visible and no login form is."""
+    def is_logged_in(self, page, sleep=time.sleep, clock=time.monotonic):
+        """True when the question box is visible and no login form is,
+        after giving the page time to render itself."""
+        self.wait_until_ready(page, sleep=sleep, clock=clock)
         box = find_first(page, self.selectors["question_box"])
         login = find_first(page, self.selectors["login_form"])
         return box is not None and login is None
@@ -495,6 +520,7 @@ class SiteDriver:
             raise BrowserStepError(
                 "navigation", "could not open {} ({})".format(self.home_url, e)
             )
+        self.wait_until_ready(page)
         # Some sites reopen the previous conversation on their home page;
         # a visible "new chat"-style button is clicked when one exists.
         button = find_first(page, self.selectors.get("new_chat", []))
@@ -515,7 +541,8 @@ class SiteDriver:
         except Exception:
             return ""
 
-    def submit_question(self, page, prompt_text):
+    def submit_question(self, page, prompt_text, sleep=time.sleep, clock=time.monotonic):
+        self.wait_until_ready(page, sleep=sleep, clock=clock)
         if find_first(page, self.selectors["login_form"]) is not None:
             raise BrowserStepError("logged_out", "the site is showing a login form")
         box = find_first(page, self.selectors["question_box"])
@@ -729,12 +756,12 @@ class DoximityDriver(SiteDriver):
 class ChatGPTCliniciansDriver(SiteDriver):
     site_id = "chatgptclinicians"
 
-    def is_logged_in(self, page):
+    def is_logged_in(self, page, **kwargs):
         """chatgpt.com shows a composer even when logged out, so being
         logged in means the login/signup buttons are gone AND the composer
         is there. The clinician workspace also requires the right account,
         which only the user can confirm - the login flow asks them."""
-        return super().is_logged_in(page)
+        return super().is_logged_in(page, **kwargs)
 
 
 class AmbossDriver(SiteDriver):

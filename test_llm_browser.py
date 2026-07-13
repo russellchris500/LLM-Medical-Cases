@@ -168,9 +168,45 @@ class SelectorOverrideTests(unittest.TestCase):
         self.assertEqual(selectors, DEFAULT_SELECTORS)
 
 
+class LateRenderingPage(FakePage):
+    """A page that draws its elements only after a few lookups, like a
+    site that renders everything with JavaScript after navigation."""
+
+    def __init__(self, elements, ready_after):
+        super().__init__({})
+        self.pending = elements
+        self.ready_after = ready_after
+        self.lookups = 0
+
+    def query_selector_all(self, selector):
+        self.lookups += 1
+        if self.lookups > self.ready_after:
+            self.elements = self.pending
+        return super().query_selector_all(selector)
+
+
 class DriverTests(unittest.TestCase):
     def setUp(self):
         self.driver = make_driver("openevidence")
+        # The fake pages render instantly, so nothing should ever wait.
+        self.driver.ready_timeout_s = 0
+
+    def test_is_logged_in_waits_for_javascript_rendering(self):
+        # gpt-oss.com paints its page well after navigation completes; the
+        # login check must keep looking instead of concluding "logged out"
+        # from a still-blank page.
+        driver = make_driver("gptoss")
+        driver.ready_timeout_s = 30
+        page = LateRenderingPage({"textarea": [FakeElement()]}, ready_after=20)
+        sleeps = []
+        clock = FakeClock()
+
+        def sleep(seconds):
+            sleeps.append(seconds)
+            clock.now += seconds
+
+        self.assertTrue(driver.is_logged_in(page, sleep=sleep, clock=clock))
+        self.assertTrue(sleeps)  # it really did wait for the page
 
     def test_is_logged_in(self):
         page = FakePage({"textarea": [FakeElement()]})
@@ -290,6 +326,7 @@ class DriverTests(unittest.TestCase):
 
     def test_gptoss_picks_120b_but_never_download_commands(self):
         driver = make_driver("gptoss")
+        driver.ready_timeout_s = 0
         picker = FakeElement(text="gpt-oss-120b")
         other = FakeElement(text="gpt-oss-20b")
         download = FakeElement(text="ollama run gpt-oss:120b")
