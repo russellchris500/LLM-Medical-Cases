@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Browser automation for the healthcare LLM sites that have no API
-(OpenEvidence, UpToDate, Doximity GPT), used by Program 3 (run_llms.py).
+(OpenEvidence, UpToDate, Doximity GPT, ChatGPT for Clinicians, AMBOSS,
+ClinicalKey AI, DynaMed, Glass Health), used by Program 3 (run_llms.py).
 
 Design notes:
 - Playwright is imported lazily; every other part of the runner works
@@ -37,7 +38,16 @@ except ImportError:
 PROFILES_DIR = "browser_profiles"
 SELECTOR_OVERRIDE_FILE = "site_selectors.json"
 
-BROWSER_MODEL_IDS = ["openevidence", "uptodate", "doximity", "chatgptclinicians"]
+BROWSER_MODEL_IDS = [
+    "openevidence",
+    "uptodate",
+    "doximity",
+    "chatgptclinicians",
+    "amboss",
+    "clinicalkeyai",
+    "dynamed",
+    "glasshealth",
+]
 
 # Ordered fallback lists: each selector is tried in turn until one matches.
 # Written generically (roles, aria labels, broad containers) because the
@@ -149,6 +159,113 @@ DEFAULT_SELECTORS = {
             "a[href='/']",
         ],
     },
+    "amboss": {
+        "question_box": [
+            "textarea",
+            "[contenteditable='true']",
+            "input[type='search']",
+            "input[type='text']",
+        ],
+        "submit_button": [
+            "button[type='submit']",
+            "[aria-label*='send' i]",
+            "[aria-label*='search' i]",
+            "[data-testid*='send' i]",
+        ],
+        "answer_container": [
+            "main [class*='answer' i]",
+            "main [class*='response' i]",
+            "main [class*='message' i]",
+            "main article",
+            "main",
+            "body",
+        ],
+        "login_form": ["input[type='password']"],
+        "answer_images": ["img"],
+        "username_field": ["input[type='email']", "input[name*='email' i]", "input[type='text']"],
+        "password_field": ["input[type='password']"],
+        "new_chat": ["[aria-label*='new chat' i]", "[aria-label*='new question' i]", "[data-testid*='new-chat' i]"],
+    },
+    "clinicalkeyai": {
+        "question_box": [
+            "textarea",
+            "[contenteditable='true']",
+            "input[type='search']",
+            "input[type='text']",
+        ],
+        "submit_button": [
+            "button[type='submit']",
+            "[aria-label*='send' i]",
+            "[data-testid*='send' i]",
+        ],
+        "answer_container": [
+            "main [class*='answer' i]",
+            "main [class*='response' i]",
+            "main [class*='message' i]",
+            "main article",
+            "main",
+            "body",
+        ],
+        # ClinicalKey AI signs in by email link / institutional SSO, so a
+        # password box may never appear; the missing question box is what
+        # marks the logged-out state.
+        "login_form": ["input[type='password']"],
+        "answer_images": ["img"],
+        "username_field": ["input[type='email']", "input[name*='email' i]", "input[type='text']"],
+        "password_field": ["input[type='password']"],
+        "new_chat": ["[aria-label*='new chat' i]", "[aria-label*='new search' i]", "[data-testid*='new-chat' i]"],
+    },
+    "dynamed": {
+        "question_box": [
+            "textarea",
+            "input[type='search']",
+            "[contenteditable='true']",
+            "input[type='text']",
+        ],
+        "submit_button": [
+            "button[type='submit']",
+            "[aria-label*='search' i]",
+            "[aria-label*='send' i]",
+        ],
+        "answer_container": [
+            "main [class*='answer' i]",
+            "main [class*='result' i]",
+            "main [class*='response' i]",
+            "main article",
+            "main",
+            "body",
+        ],
+        "login_form": ["input[type='password']"],
+        "answer_images": ["img"],
+        "username_field": ["input[name*='user' i]", "input[type='email']", "input[type='text']"],
+        "password_field": ["input[type='password']"],
+        "new_chat": ["[aria-label*='new search' i]", "[aria-label*='new question' i]"],
+    },
+    "glasshealth": {
+        "question_box": [
+            "textarea",
+            "[contenteditable='true']",
+            "input[type='text']",
+        ],
+        "submit_button": [
+            "button[type='submit']",
+            "[aria-label*='send' i]",
+            "[data-testid*='send' i]",
+        ],
+        "answer_container": [
+            "main [class*='answer' i]",
+            "main [class*='response' i]",
+            "main [class*='message' i]",
+            "main article",
+            "main",
+            "body",
+        ],
+        "login_form": ["input[type='password']"],
+        "answer_images": ["img"],
+        "username_field": ["input[type='email']", "input[name*='email' i]", "input[type='text']"],
+        "password_field": ["input[type='password']"],
+        "new_chat": ["[aria-label*='new chat' i]", "[aria-label*='new question' i]", "[data-testid*='new-chat' i]"],
+    },
 }
 
 SITE_INFO = {
@@ -171,6 +288,26 @@ SITE_INFO = {
         "display_name": "ChatGPT for Clinicians",
         "home_url": "https://chatgpt.com/",
         "login_url": "https://chatgpt.com/auth/login",
+    },
+    "amboss": {
+        "display_name": "AMBOSS",
+        "home_url": "https://next.amboss.com/us",
+        "login_url": "https://next.amboss.com/us/login",
+    },
+    "clinicalkeyai": {
+        "display_name": "ClinicalKey AI",
+        "home_url": "https://ai.clinicalkey.com/",
+        "login_url": "https://ai.clinicalkey.com/",
+    },
+    "dynamed": {
+        "display_name": "DynaMed",
+        "home_url": "https://www.dynamed.com/",
+        "login_url": "https://www.dynamed.com/login",
+    },
+    "glasshealth": {
+        "display_name": "Glass Health",
+        "home_url": "https://glass.health/",
+        "login_url": "https://glass.health/login",
     },
 }
 
@@ -565,11 +702,31 @@ class ChatGPTCliniciansDriver(SiteDriver):
         return super().is_logged_in(page)
 
 
+class AmbossDriver(SiteDriver):
+    site_id = "amboss"
+
+
+class ClinicalKeyAIDriver(SiteDriver):
+    site_id = "clinicalkeyai"
+
+
+class DynaMedDriver(SiteDriver):
+    site_id = "dynamed"
+
+
+class GlassHealthDriver(SiteDriver):
+    site_id = "glasshealth"
+
+
 DRIVER_CLASSES = {
     "openevidence": OpenEvidenceDriver,
     "uptodate": UpToDateDriver,
     "doximity": DoximityDriver,
     "chatgptclinicians": ChatGPTCliniciansDriver,
+    "amboss": AmbossDriver,
+    "clinicalkeyai": ClinicalKeyAIDriver,
+    "dynamed": DynaMedDriver,
+    "glasshealth": GlassHealthDriver,
 }
 
 

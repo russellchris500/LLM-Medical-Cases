@@ -294,6 +294,10 @@ DEFAULT_SETTINGS = {
         "uptodate": {"username": "", "password": "", "model": "", "last_login_ok": None},
         "doximity": {"username": "", "password": "", "model": "", "last_login_ok": None},
         "chatgptclinicians": {"username": "", "password": "", "model": "", "last_login_ok": None},
+        "amboss": {"username": "", "password": "", "model": "", "last_login_ok": None},
+        "clinicalkeyai": {"username": "", "password": "", "model": "", "last_login_ok": None},
+        "dynamed": {"username": "", "password": "", "model": "", "last_login_ok": None},
+        "glasshealth": {"username": "", "password": "", "model": "", "last_login_ok": None},
     },
     "options": {
         "deep_thinking": True,
