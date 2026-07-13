@@ -1,7 +1,7 @@
 {
   "format_version": 1,
   "provider_number": 1,
-  "max_assigned_case_number": 3,
+  "max_assigned_case_number": 50,
   "cases": [
     {
       "case_id": "001-001",
@@ -38,6 +38,642 @@
       ],
       "created_at": "2026-07-12T18:06:25Z",
       "updated_at": "2026-07-12T18:06:25Z"
+    },
+    {
+      "case_id": "001-004",
+      "case_number": 4,
+      "case_text": "35 year old man with a history of GERD, prior alcohol abuse had the sudden onset of low back pain 8 days ago. Was working out on treadmill. Pain is in the central mid lumbar region, 9/10 in intensity and constant. Worse when sitting a long time. No leg weakness, numbness, or pain. Exam is normal. No benefit from 6 day medrol pack, Tylenol, or cyclobenzaprine. Ibuprofen helped a bit but caused dyspepsia. He is slightly better but still wants something for pain.",
+      "rubric": [
+        "No narcotics",
+        "No need for imaging",
+        "Suzetrigine among suggestions"
+      ],
+      "created_at": "2026-07-12T20:58:20Z",
+      "updated_at": "2026-07-12T20:58:20Z"
+    },
+    {
+      "case_id": "001-005",
+      "case_number": 5,
+      "case_text": "55 year old man with 8 months of progressive difficulty walking and bilateral foot numbness. The exam shows reduced pinprick in the feet, bilateral foot dorsiflexion mild weakness, DTRs 3+ at the knees and ankles with bilateral upgoing toes. His gait is broad based. MRI of the brain is normal. MRI of the entire spine shows a vague, nonenhancing area of increased T2 signal in the central conus. What are the next steps?",
+      "rubric": [
+        "Consider dural AV fistula",
+        "Vascular spine imaging suggested"
+      ],
+      "created_at": "2026-07-12T20:59:04Z",
+      "updated_at": "2026-07-12T20:59:04Z"
+    },
+    {
+      "case_id": "001-006",
+      "case_number": 6,
+      "case_text": "27 year old woman with 1 year history of progressive bifrontal headache, 5/10 in intensity, and 5 months of \"spots in her vision\". Has occasional pulsatile tinnitus. Sent to the ED because she saw an ophthalmologist who noted bilateral disk edema. On presentation Temp 36.8 BP 138/82, HR 92, BMI 33. Exam shows bilateral disk edema with right eye 20/40 and left eye 20/20. Lumbar puncture showed opening pressure 18 cm of water. CSF WBC 9 with 90% lymphocytes, RBC 2, protein 29 mg/dl, glucose 69 mg/dl. CSF gram stain is negative. MRI brain with contrast is negative. What are the next steps?",
+      "rubric": [
+        "Neurosyphyilis high in differential",
+        "Differential: Leptomeningeal carcinomatosis",
+        "Differnetial: Sarcoidosis",
+        "Order CSF VDRL, cytology. Serum RPR, treponemal testing",
+        "Order CT chest/abdomen/pelvis"
+      ],
+      "created_at": "2026-07-12T21:00:53Z",
+      "updated_at": "2026-07-12T21:00:53Z"
+    },
+    {
+      "case_id": "001-007",
+      "case_number": 7,
+      "case_text": "76 year old man with type 2 diabetes mellitus, coronary disease diagnosed with left temporal glioblastoma 12 months ago based upon headache. He has surgical resection and was treated with temozolomide and Optune. Had recurrence 3 months ago with MRI brain showing left temporal recurrence with new enhancement and 4 mm midline shift. Started bevicizumab but has continued to worsen. Now is mostly bed bound in an assisted living facility with right sided weakness. What are the next steps?",
+      "rubric": [
+        "Hospice is primary option"
+      ],
+      "created_at": "2026-07-12T21:02:02Z",
+      "updated_at": "2026-07-12T21:02:02Z"
+    },
+    {
+      "case_id": "001-008",
+      "case_number": 8,
+      "case_text": "64 year old woman with a history of stage 2 breast cancer 2 years ago treated with bilateral mastectomy, chemotherapy, and currently on anastrozole at a different facility. At this facility underwent surveillance brain MRI with contrast one week ago showing a 1.8 cm homogeneously enhancing dural based mass over the left frontal convexity without surrounding edema. She is asymptomatic and has a normal neurologic exam. What are the next steps?",
+      "rubric": [
+        "Likely meningioma",
+        "Inquire about prior imaging",
+        "Follow up imaging in 2-3 months"
+      ],
+      "created_at": "2026-07-12T21:03:20Z",
+      "updated_at": "2026-07-12T21:03:20Z"
+    },
+    {
+      "case_id": "001-009",
+      "case_number": 9,
+      "case_text": "26 year old with a two-year history of complex partial seizures consisting of staring episodes lasting 1 minute with an EEG 2 years ago showing left temporal spike and wave activity. On oxcarbazepine 600 mg 2 times a day. Has a 6 month history of episodes of bilateral arm movement with loss of consciousness. Follow up routine EEG is normal. Ambulatory video EEG shows arm movement episodes with EEG showing normal background rhythm. What are the next steps?",
+      "rubric": [
+        "Patient likely has both epileptic and nonepileptic episodes",
+        "Do not taper meds",
+        "Mental health evaluation"
+      ],
+      "created_at": "2026-07-12T21:05:17Z",
+      "updated_at": "2026-07-12T21:05:17Z"
+    },
+    {
+      "case_id": "001-010",
+      "case_number": 10,
+      "case_text": "21 year old brought into ED by family due to a witnessed generalized seizure. In triage the patient is in a wheelchair and drowsy. She has a witnessed generalized seizure in triage and brought back to a room. Noted to be very drowsy on exam and moving all extremities. She has another generalized seizure. What are the next steps?",
+      "rubric": [
+        "secure airway",
+        "Check vitals",
+        "Check glucose",
+        "Stat CMP",
+        "Give benzo at appropriate doses",
+        "Load with appropriate doses of Keppra 60 mg/kg, fosphenytoin 20 mg/kg or lacosamide 200-400 mg IV",
+        "Stat head CT without",
+        "No MRI while seizing"
+      ],
+      "created_at": "2026-07-12T21:06:45Z",
+      "updated_at": "2026-07-12T21:06:45Z"
+    },
+    {
+      "case_id": "001-011",
+      "case_number": 11,
+      "case_text": "34 year old with partial epilepsy since age 14 is on oxcarbazepine ER 600 mg 2 times a day. He has no seizures on this dose but is ataxic with intermittent diplopia.  At a dose of 450 mg 2 times a day he still was slightly off balance and had occasional seizures. What are the next steps?",
+      "rubric": [
+        "Switch to different sodium channel blocker: eslicarbazepine, lacosamide, lamotrigine, cenobamate"
+      ],
+      "created_at": "2026-07-12T21:07:17Z",
+      "updated_at": "2026-07-12T21:07:17Z"
+    },
+    {
+      "case_id": "001-012",
+      "case_number": 12,
+      "case_text": "28 year old woman with a history of seizures since age 21. A typical seizure is staring and unresponsiveness for 45 seconds. She is confused for 2 minutes afterwards. At worst episodes occurred daily, now two times a week. Currently on lamotrigine 200 mg 2 times daily and clobazam 20 mg two times daily.  Tried Keppra and oxcarbazepine in the past without benefit. Most recent EEG showed focal polymorphic delta in the right temporal region. Exam is normal. Recent CBC and CMP are normal. What are the next steps?",
+      "rubric": [
+        "Identify refractory epilepsy",
+        "Refer to comprehensive epilepsy center",
+        "Surgery may be an option",
+        "Increase lamotrigine/consider cenobamate"
+      ],
+      "created_at": "2026-07-12T21:08:34Z",
+      "updated_at": "2026-07-12T21:08:34Z"
+    },
+    {
+      "case_id": "001-013",
+      "case_number": 13,
+      "case_text": "44 year old with a history of seizures for 5 years. Last seizure was 1 year ago. Currently controlled with lacosamide 100 mg 2 times a day and levetiracetam 500 mg 2 times a day. She feels drowsy on her current regimen. Has not tried other meds. What are the next steps?",
+      "rubric": [
+        "Consider conversion to lacosamide monotherapy"
+      ],
+      "created_at": "2026-07-12T21:08:59Z",
+      "updated_at": "2026-07-12T21:08:59Z"
+    },
+    {
+      "case_id": "001-014",
+      "case_number": 14,
+      "case_text": "54 year old with a history of type 2 diabetes mellitus for 20 years with diabetic distal neuropathy and autonomic neuropathy. Has tried droxidopa and fludrocortisone without relief. Supine BP is 144/84 with heart rate 76 and standing BP is 96/64 with heart rate 80. She is lightheaded when standing. What are the next steps to improve her orthostatic dizziness?",
+      "rubric": [
+        "Midodrine",
+        "Avoid lying down with midodrine",
+        "Abdominal binder",
+        "Oral fluid bolus",
+        "Physical countermeasures"
+      ],
+      "created_at": "2026-07-12T21:11:12Z",
+      "updated_at": "2026-07-12T21:11:12Z"
+    },
+    {
+      "case_id": "001-015",
+      "case_number": 15,
+      "case_text": "21 year old man with 3 weeks of progressive numbness and weakness in the legs. Began in the feet and has spread to the thighs. His hands are now numb and he has difficulty walking. He has tunnel vision and his hearing is poor. Was exposed to influenza and COVID 2 months ago without illness. Has lost 35 pounds intentionally. He is stressed out about his poor school grades. On exam his leg reflexes are absent. He has reduced pinprick and vibration in the feet. Gait is ataxic. What are the next steps?",
+      "rubric": [
+        "Consider Adult onset acute Refsum disease",
+        "Consider AIDP",
+        "Order MRI brain and spine",
+        "Labs:B12, Phytanic acid, Thiamine, Copper, Syphilis, HIV"
+      ],
+      "created_at": "2026-07-12T21:14:46Z",
+      "updated_at": "2026-07-12T21:14:46Z"
+    },
+    {
+      "case_id": "001-016",
+      "case_number": 16,
+      "case_text": "22 year old woman with history of right tibia compound fracture at age 14 requiring surgeries and fasciotomy complicated by osteomyelitis and DVT. Presents to the ED with 2 weeks of progressive diffuse headache, now 10/10 in intensity. Headache is worse laying flat. Has intermittent horizontal diplopia for the last 7 days. CT head without contrast shows maxillary sinusitis. BP 110/74 HR 84, T 96.8 RR 12 Height 5'4\" Weight 120 lbs. On exam she has a right sixth nerve palsy. What are the next steps?",
+      "rubric": [
+        "Consider Venous sinus thrombosis",
+        "Order CTV head",
+        "Ask about amily history of clotting",
+        "Labs: AT3, Prot S/C, Factor 5 Leiden, PT gene mutation, Lupus anticoagulant"
+      ],
+      "created_at": "2026-07-12T21:16:19Z",
+      "updated_at": "2026-07-12T21:16:19Z"
+    },
+    {
+      "case_id": "001-017",
+      "case_number": 17,
+      "case_text": "56 year old man with a 2 year history of progressive confusion and memory loss. Past medical history of GERD. He is depressed and less interactive per family. Has trouble navigating when driving and gets confused with keeping his finances. His gait is slower. There is no family history. On exam he has an MMSE of 24/30 missing 2 points for orientation, 1 for delayed recall, 2 for serial sevens, and 1 for copying. He only speaks when asked questions. His gait is slow and broad based. Mild bilateral leg rigidity. MRI of the brain shows extensive, confluent increased T2 in the periventricular white matter and splenium of the corpus callosum with diffuse atrophy.",
+      "rubric": [
+        "Include CSF1R Adult-onset leukoencephalopathy with axonal spheroids and pigmented glia in differential"
+      ],
+      "created_at": "2026-07-12T21:16:50Z",
+      "updated_at": "2026-07-12T21:16:50Z"
+    },
+    {
+      "case_id": "001-018",
+      "case_number": 18,
+      "case_text": "55-year-old woman with 2-week history of an intermittent spinning sensation which causes balance difficulty.  Denies any focal neurologic symptoms.  What history questions and exam components can help to distinguish between central vertigo, vestibular neuronitis, and benign paroxysmal positional vertigo?",
+      "rubric": [
+        "Ear symptoms",
+        "diplopia",
+        "headache",
+        "exacerbating movements",
+        "change with eyes closed",
+        "presence or absence of lateralizing neurologic symptoms",
+        "Hallpike maneuver",
+        "vestibulo-ocular reflex",
+        "direction changing versus fixed nystagmus",
+        "vertical nystagmus",
+        "skew deviation",
+        "hearing loss"
+      ],
+      "created_at": "2026-07-12T21:19:23Z",
+      "updated_at": "2026-07-12T21:19:23Z"
+    },
+    {
+      "case_id": "001-019",
+      "case_number": 19,
+      "case_text": "47 year old woman with a history of asthma. 2 months ago a family member told her that her right eye was drooping a bit. She did not notice it in the mirror. No diplopia, visual loss, dysarthria, dysphagia, dyspnea, or limb weakness. On exam her right pupil is 2 smaller than the left pupil in the dark only. Her exam is otherwise normal. What are the next steps?",
+      "rubric": [
+        "Recognize right Horner syndrome",
+        "Order MRI brain with",
+        "Order Carotid vascular imaging",
+        "Order CT or MRI Neck/chest imaging"
+      ],
+      "created_at": "2026-07-12T21:20:21Z",
+      "updated_at": "2026-07-12T21:20:21Z"
+    },
+    {
+      "case_id": "001-020",
+      "case_number": 20,
+      "case_text": "34-year-old man with no medical history.  Comes in because of 2 weeks of progressive numbness in his feet as well as gait unsteadiness.  He is off balance but able to walk without assistance.  No weakness or arm symptoms.  No bladder or bowel symptoms.  On exam he has decreased vibratory and joint position sense in the toes.  Arm and knee reflexes are 2+ and ankle reflexes are absent.  Bilateral Babinskis are present.  His gait is ataxic and he is able to walk without assistance.  What important nutritional and drug questions should be asked?",
+      "rubric": [
+        "Spinal cord involvement",
+        "zinc supplementation",
+        "vegetarian",
+        "PPIs",
+        "nitrous oxide abuse",
+        "GI surgeries"
+      ],
+      "created_at": "2026-07-12T21:22:19Z",
+      "updated_at": "2026-07-12T21:22:19Z"
+    },
+    {
+      "case_id": "001-021",
+      "case_number": 21,
+      "case_text": "76-year-old comes in because of confusion over the last 4 months.  Family says that he will forget recent events and sometimes becomes confused.  He mixes up stories from the past and rarely will see visual hallucinations consisting of small black dots like insects.  He will take naps during the day but is up at night with occasional agitation.  Past medical history of coronary disease, diabetes, irritable bowel syndrome, GERD, PCI, prostate cancer, history of appendectomy.  On examination he is alert but distractible and oriented to city, state, and year but not to building or month.  There is no aphasia.  His gait is slow but strength, sensation, and reflexes are normal.  What are reversible causes of his confusion?",
+      "rubric": [
+        "hyoscyamine",
+        "B12",
+        "thyroid disease",
+        "seizure"
+      ],
+      "created_at": "2026-07-12T21:23:09Z",
+      "updated_at": "2026-07-12T21:23:09Z"
+    },
+    {
+      "case_id": "001-022",
+      "case_number": 22,
+      "case_text": "37 year old woman with no significant past medical history. She has a history of occasional diffuse headaches which are mild and intensity, occurring about once a month and trigger by stress. Seen in the ED because of sudden onset of a severe diffuse headache, 10/10 in intensity, associated with nausea. The headache does not change with position. CT of the head is negative. What are the next steps?",
+      "rubric": [
+        "Order CTA/MRA head",
+        "Recognize reversible cerebral vasoconstriction syndrome",
+        "Treatment with verapamil if vascular imaging positive"
+      ],
+      "created_at": "2026-07-12T21:25:53Z",
+      "updated_at": "2026-07-12T21:25:53Z"
+    },
+    {
+      "case_id": "001-023",
+      "case_number": 23,
+      "case_text": "ER calls with 45 yo with history of hyperlipidemia on lipitor. 2 weeks ago had a fall with head/neck injury treated with OTC meds and chiropractor. Intermittent vertigo since. Pain resolved. Witnessed sudden LOC 2 hours ago. EMS witnessed episodes of bilateral leg extension lasting 5 seconds consistent with seizure. No change with narcan. Intubated in the ED. BP 160/100. On exam is unresponsive. Pupils small and reactive and has spontaneous nystagmus. Loaded with Keppra 1000 mg IV. CT head without is negative.  What are the next steps to advise the ED?",
+      "rubric": [
+        "Consider asilar artery occlusion",
+        "Recognize prior neck injury causing dissection",
+        "Order CTA head and neck",
+        "Consider TPA for stroke",
+        "Needs thrombectomy if basilar occlusion"
+      ],
+      "created_at": "2026-07-12T21:27:18Z",
+      "updated_at": "2026-07-12T21:27:18Z"
+    },
+    {
+      "case_id": "001-024",
+      "case_number": 24,
+      "case_text": "Patient with 12 hours of mild left arm, face, and leg weakness. History of diabetes, hypertension, TAVR. CT of the head is negative. MR of the brain shows small multifocal areas of acute infarct in both cerebral hemispheres and left cerebellum. Temperature 101.5. WBC 15,000 with 80% neutrophils.",
+      "rubric": [
+        "Consider endocarditis",
+        "Should only start aspirin and not DAPT",
+        "Order MRA or CTA of the head and echocardiogram"
+      ],
+      "created_at": "2026-07-12T21:28:27Z",
+      "updated_at": "2026-07-12T21:28:27Z"
+    },
+    {
+      "case_id": "001-025",
+      "case_number": 25,
+      "case_text": "56 year old with PAD, CAD on plavix. Fell asleep yesterday night at 11:30 PM feeling normal. Awoke at 1:45 AM with dysarthria, left arm, and left leg weakness.  Seen via telemed in ED at 4:30 AM. Exam shows NIH stroke scale 7 due to dysarthria and left face, arm, and leg weakness. CT head without is normal. BP 160/92. What are the next steps?",
+      "rubric": [
+        "Beyond traditional TPA window",
+        "Recognize wake up stroke",
+        "TPA may be option of perfusion imaging done",
+        "NIH score okay for DAPT per new giudelines",
+        "Order CTA head/neck in ED"
+      ],
+      "created_at": "2026-07-12T21:29:41Z",
+      "updated_at": "2026-07-12T21:29:41Z"
+    },
+    {
+      "case_id": "001-026",
+      "case_number": 26,
+      "case_text": "64 year old with history of hypertension, hyperlipidemia on Valsartan 160 mg daily and pravastatin 20 mg daily. Presents with 2 hours of transient difficulty getting words out accompanied by a mild bifrontal headache this morning. He knew what he wanted to say but couldn't say the word. Symptoms resolved after 2 hours. No other symptoms or prior history of similar symptoms. His exam is normal. CT of the head is negative. CTA head and neck shows bilateral proximal ICA plaque with less than 50% stenosis. Labs significant for normal CMP, CBC. HDL 42, LDL 97. HbA1c 5.8. What are the next steps?",
+      "rubric": [
+        "Recognize TIA vs small stroke",
+        "High prob of stroke on MRI",
+        "Order MRI brain without, TTE",
+        "Stroke suspicious for cardiac embolism",
+        "Needs outpatient MCOT or ILR",
+        "DAPT for 3 weeks, then ASA",
+        "Target LDL < 70 with high dose rosuvastatin or atorvastatin"
+      ],
+      "created_at": "2026-07-12T21:31:04Z",
+      "updated_at": "2026-07-12T21:31:04Z"
+    },
+    {
+      "case_id": "001-027",
+      "case_number": 27,
+      "case_text": "A 67 year old noted loss of vision in left eye for 2 minutes 3 weeks ago. Did not close one eye to test. No eye pain, headache, confusion, weakness, numbness, dizziness. What is the differential diagnosis?",
+      "rubric": [
+        "Recognize symptoms may have been visual field defect",
+        "Occipital TIA",
+        "Amaurosis Fugax due to embolic, carotid, retinal artery/vein",
+        "Temporal arteritis"
+      ],
+      "created_at": "2026-07-12T21:32:15Z",
+      "updated_at": "2026-07-12T21:32:15Z"
+    },
+    {
+      "case_id": "001-028",
+      "case_number": 28,
+      "case_text": "34 year old with sudden onset left lumbar pain while lifting a heavy box two weeks ago. Has pain down the left lateral thigh into the lateral calf and onto the dorsum of the left foot. He says he is tripping over his left foot. On exam has left foot dorsiflexion and toe extension strength 3/5. Decreased sensation on the dorsum of the left foot. DTRs 2+. What are the next steps?",
+      "rubric": [
+        "Left L5 radiculopathy",
+        "Needs MRI lumbar now due to weakness",
+        "Surgical referral",
+        "Possible steroids"
+      ],
+      "created_at": "2026-07-12T21:33:47Z",
+      "updated_at": "2026-07-12T21:33:47Z"
+    },
+    {
+      "case_id": "001-029",
+      "case_number": 29,
+      "case_text": "69 year old man with history of myasthenia gravis on pyridostigmine 60 mg three times daily at home. Main symptoms in the past are ptosis, diplopia, and dysarthria. No prior hospitalizations for myasthenia. Admitted because of fever, cough, dyspnea and diagnosed with pneumonia. On IV levofloxacin due to multiple drug allergies. Has developed bilateral proximal arm weakness. BP 130/80 HR 46, Respirations 20, Temperature 97.8. On exam he has right sided ptosis, is dysarthric, and has bilateral deltoid and triceps weakness. ABG with ph 7.45 pO2 80 of 2 L NC, pCO2 35. What are the next steps from a neurological standpoint?",
+      "rubric": [
+        "Levoquin can worsen MG",
+        "Likely not in respiratory failure",
+        "Pyridostigmine may be contributing to bradycardia",
+        "Consider IVIG"
+      ],
+      "created_at": "2026-07-12T21:34:40Z",
+      "updated_at": "2026-07-12T21:34:40Z"
+    },
+    {
+      "case_id": "001-030",
+      "case_number": 30,
+      "case_text": "80 year old man with 5 years of progressive numbness in his feet. No pain or tingling. History of HTN, CAD, CABG. On exam has reduced pinprick to the mid calves, absent vibration at the toes, DTRs 2+ arms, 1+ knees, absent ankles. His gait is slow. What are the next steps?",
+      "rubric": [
+        "Diagnosis neuropathy",
+        "Differential idiopathic, DM, EtOH, B12, thyroid, MGUS, familial",
+        "Order EMG test",
+        "No role for meds"
+      ],
+      "created_at": "2026-07-12T21:35:45Z",
+      "updated_at": "2026-07-12T21:35:45Z"
+    },
+    {
+      "case_id": "001-031",
+      "case_number": 31,
+      "case_text": "23 year old with a gunshot wound to the right shoulder and neck 2 months ago. Has right deltoid and biceps strength 0/5. Wrist and hand are 5/5. Has numbness over the right deltoid. EMG is being performed and so far shows evidence of denervation in the right biceps with normal first dorsal interosseus and flexor carpi radialis. What 4 additional muscles should be tested with the needle exam to further localize the nerve injury, assuming a single point of nerve injury?",
+      "rubric": [
+        "Serratus anterior or rhomboids",
+        "Deltoid",
+        "Supra or infraspinatus"
+      ],
+      "created_at": "2026-07-12T21:36:34Z",
+      "updated_at": "2026-07-12T21:36:34Z"
+    },
+    {
+      "case_id": "001-032",
+      "case_number": 32,
+      "case_text": "74 year old with progressive numbness and tingling of the left 2nd and 3rd fingers for 6 months. No pain up the arm. Occurs intermittently, often when he wakes in the morning. Neurologic exam is normal. What are the next steps?",
+      "rubric": [
+        "Diagnosis Carpal tunnel",
+        "Consider EMG",
+        "Treatment with splinting",
+        "Evaluate for TTR amyloidosis"
+      ],
+      "created_at": "2026-07-12T21:37:27Z",
+      "updated_at": "2026-07-12T21:37:27Z"
+    },
+    {
+      "case_id": "001-033",
+      "case_number": 33,
+      "case_text": "54 year old woman with no medical history has 2 years of episodic pain in the right throat and right palate. The pain is a severe shooting pain lasting less than 5 seconds. It happens over 10 times a day, often triggered by talking or swallowing, especially swallowing cold liquids. 2 years ago it went away completely but returned 6 months ago and has been daily. She saw a dentist who found no abnormality.  MRI of the brain with and without contrast was normal. Gabapentin 300 mg twice a day does not help. What are the next steps?",
+      "rubric": [
+        "Identify glossopharyngeal neuralgia as possible cause",
+        "Change treatment to carbamazepine, oxcarbazepine, lamotrigine, or similar sodium channel blocker",
+        "Do not just increase gabapentin dose",
+        "Consider MRI of posterior fossa with contrast",
+        "Recommend microvascular decompression as further treatment"
+      ],
+      "created_at": "2026-07-12T21:38:40Z",
+      "updated_at": "2026-07-12T21:38:40Z"
+    },
+    {
+      "case_id": "001-034",
+      "case_number": 34,
+      "case_text": "23-year-old with history of migraine headaches since age 14.  A typical headache is a unilateral frontal throbbing pain, 8/10 in intensity associated with nausea and photophobia.  They can last from 1 to 2 days.  Headaches have become more frequent and she now averages 4 headache days a week.  She has tried preventatives in the past including Topamax and propranolol without benefit.  MRI of the brain several years ago was normal by her report.  Her neurologic exam is normal.  She is getting married and thinking about getting pregnant.  What are the next steps?",
+      "rubric": [
+        "Recognize limitations due to pregnancy",
+        "Possible treatment with Botox",
+        "Possible treatment with intermittent electrical stimulation"
+      ],
+      "created_at": "2026-07-12T21:40:06Z",
+      "updated_at": "2026-07-12T21:40:06Z"
+    },
+    {
+      "case_id": "001-035",
+      "case_number": 35,
+      "case_text": "56-year-old woman with a history of diabetes mellitus for 20 years, hypertension, kidney stones, coronary disease status post PCI on carvedilol, Plavix, metformin, Toujeo Solostar, losartan.  She has a history of headaches going back 20 years.  A typical headache is a bilateral frontal throbbing headache, 8/10 in intensity associated with nausea, photophobia, and phonophobia.  The headache does not change with position.  Was previously triggered by her menstrual cycle.  Headache starts anytime of day and typically lasts the rest of the day.  She averages about 2 headaches a week.  She has tried multiple over-the-counter medications and Fioricet without relief.  The headaches have been gradually worsening over the last 2 years.  MRI of the brain without contrast 6 months ago showed moderate amount of white matter change consistent with chronic microvascular ischemic change.  Her neurologic exam is normal.  She would like to take something when she gets a headache and is willing to take a preventative medication.  What are the next steps?",
+      "rubric": [
+        "Recognize migraine",
+        "Headaches are frequent enough for preventive",
+        "Needs rescue and preventive",
+        "Avoid triptan as rescue due to CAD",
+        "Avoid topamax due to contraindications",
+        "Avoid beta blocker due to carvedilol"
+      ],
+      "created_at": "2026-07-13T12:28:40Z",
+      "updated_at": "2026-07-13T12:28:40Z"
+    },
+    {
+      "case_id": "001-036",
+      "case_number": 36,
+      "case_text": "52 year old man with history of hypertension, GERD, sinus surgery, appendectomy. He has six months of a dull, diffuse, 5 of 10 headache sometimes associated with nausea. The headache occurs daily and is sometimes debilitating. The headache starts when he gets up in the morning and goes away at night when he lays down for bed. He takes losartan and pantoprazole. His neurologic exam is normal. What are the next steps?",
+      "rubric": [
+        "Possible low pressure headache",
+        "Prior sinus surgery as possible cause",
+        "MRI brain with",
+        "MRI findings in low pressure headache",
+        "ENT referral"
+      ],
+      "created_at": "2026-07-13T12:29:59Z",
+      "updated_at": "2026-07-13T12:29:59Z"
+    },
+    {
+      "case_id": "001-037",
+      "case_number": 37,
+      "case_text": "54-year-old woman with a history of a matched related donor kidney transplant 2 years ago. Current creatinine 1.5. She has a 3-month history of a progressive headache. The headache is a dull diffuse headache sometimes associated with blurred vision. It is a bit worse when she lays down but present at all times. Relates a fever at home of 100.1 one week ago. Head CT one week ago is normal. Her neurologic exam is normal. What are the next steps?",
+      "rubric": [
+        "immunosuppressed due to anti-rejection medications",
+        "Cryptococcal meningitis in differential diagnosis",
+        "Lumbar puncture",
+        "Serum cryptococcal antigen"
+      ],
+      "created_at": "2026-07-13T12:30:44Z",
+      "updated_at": "2026-07-13T12:30:44Z"
+    },
+    {
+      "case_id": "001-038",
+      "case_number": 38,
+      "case_text": "82-year-old with history of hypertension, hyperlipidemia, diabetes mellitus type 2, rheumatoid arthritis, depression.  She is seen with her daughter.  Has 2 years of progressive short-term memory loss.  The patient moved into assisted living 6 months ago and was previously living alone.  When living alone she had difficulty cooking for herself and had to have meals brought in.  Her daughter has been keeping her finances for a year and the patient has been unable to drive for 2 years because she was getting lost.  She was not taking her medications properly but is doing well in the assisted living with her medications.  She takes losartan 80 mg daily, atorvastatin 40 mg daily, escitalopram 20 mg daily, and quetiapine 50 mg at bedtime.  On examination her gait is slow with a walker.  MMSE is 17/30, missing points primarily for orientation and delayed recall.  What are the next steps?",
+      "rubric": [
+        "Recognize patient likely has Alzheimer's",
+        "Order brain imaging with CT or MRI",
+        "Order B12 and thyroid function",
+        "Recognize risk of quetiapine",
+        "Recognize caution with acetylcholinesterase inhibitors due to QT prolongation",
+        "Start memantine or rivastigmine"
+      ],
+      "created_at": "2026-07-13T12:33:02Z",
+      "updated_at": "2026-07-13T12:33:02Z"
+    },
+    {
+      "case_id": "001-039",
+      "case_number": 39,
+      "case_text": "77-year-old woman with a history of atrial fibrillation, hypertension, and recent diagnosis of dementia.  She is allergic to penicillin.  Medications include carvedilol, Eliquis, donepezil, memantine.  She has undergone amyloid PET scan which was positive for amyloid.  MRI of the brain shows moderate chronic white matter changes without evidence of infarct or microhemorrhages.  Underwent APOE testing showing APO E3/4 genotype.  On examination her MMSE is 22/30, missing points primarily for orientation and delayed recall.  The family and patient are interested in antiamyloid therapy.  What are the next steps?",
+      "rubric": [
+        "Recognize that Eliquis is a contraindication to antiamyloid therapy",
+        "Recognize Alzheimer's as diagnosis",
+        "MMSE, APOE, MRI, and amyloid PET scan are all consistent with starting antiamyloid therapy"
+      ],
+      "created_at": "2026-07-13T12:34:39Z",
+      "updated_at": "2026-07-13T12:34:39Z"
+    },
+    {
+      "case_id": "001-040",
+      "case_number": 40,
+      "case_text": "75-year-old man who comes in with family.  Prior history of coronary disease with MI and PCI on Plavix as well as hypothyroidism on Synthroid.  Prior history of lumbar and cervical spine surgery as well as Nissen fundoplication.  He has a 2-year history of progressive cognitive and behavioral problems.  He has depression and trouble with agitation.  He will sometimes see people in his house and he thinks that his furniture has been replaced with identical appearing furniture.  He becomes verbally abusive when family tells him that this is not the case.  He sometimes forgets recent events but still is able to drive, keep his appointments, and keep up with his finances.  His gait has been slow for several years since his lumbar surgery.  He is taking Seroquel 50 mg for sleep and also takes Depakote 250 mg 3 times a day for agitation which has not helped.  On examination his MMSE is 26/30, missing points for copying, serial sevens, and 1 point for short-term recall.  His gait is slow with reduced reflexes at the ankles.  He has a moderate tremor which he says interferes with eating and handwriting.  MRI of the brain showed only mild atrophy and mild white matter changes.  Family would like further testing.  What are the next steps?",
+      "rubric": [
+        "Lewy body dementia is most likely diagnosis",
+        "DAT scan and skin biopsy are sometimes helpful in diagnosis",
+        "Depakote is the cause of his tremor",
+        "Seroquel may be worsening his symptoms",
+        "May benefit from acetylcholinesterase inhibitors"
+      ],
+      "created_at": "2026-07-13T12:36:19Z",
+      "updated_at": "2026-07-13T12:36:19Z"
+    },
+    {
+      "case_id": "001-041",
+      "case_number": 41,
+      "case_text": "62 year old woman with history of diabetes, peripheral arterial disease, bipolar disorder on metformin, aspirin, clopidigrel, Depakote, and Vraylar. Admitted to the hospital one week ago with community acquired pneumonia treated with IV levofloxacin, now completed. She has been confused and drowsy during her admission with no improvement in her mental status despite resolution of her pneumonia. On exam she is drowsy, briefly waking to stimulation. Follow commands but not oriented. No abnormal cranial nerve findings and she moves all extremities well. CT of the head without contrast is normal. CMP and CMP are normal except for a sodium of 133. What are the next steps?",
+      "rubric": [
+        "Toxic-Metabolic Encephalopathy",
+        "Hyponatremia unlikely only cause",
+        "Labs: B12, thyroid function, ammonia, Depakote level",
+        "Order MRI brain without",
+        "Depakote can cause hyperammonemia"
+      ],
+      "created_at": "2026-07-13T12:43:28Z",
+      "updated_at": "2026-07-13T12:43:28Z"
+    },
+    {
+      "case_id": "001-042",
+      "case_number": 42,
+      "case_text": "35 year old woman with history of MS for 5 years on fingolimod for 5 years. Has 2 months of bilateral leg tingling and numbness with gait unsteadiness. Exam is normal. MRI brain shows moderate MS disease burden with no enhancing lesions and no change from MRI 1 year ago. MRI cervical spine shows a small enhancing lesion in the spinal cord at C5 level, new compared with prior study 1 year ago. Her CBC with diff is normal. JC virus antibody is positive. Prior to this presentation, she has been stable clinically and by MRI since starting fingolimod. What are the next steps?",
+      "rubric": [
+        "Exacerbation with symptoms and MRI correlating",
+        "Breakthrough disease",
+        "Need for highly active therapy",
+        "Tysabri risk with JCV+",
+        "Consider steroids",
+        "Start anti-CD20 drug"
+      ],
+      "created_at": "2026-07-13T12:44:52Z",
+      "updated_at": "2026-07-13T12:44:52Z"
+    },
+    {
+      "case_id": "001-043",
+      "case_number": 43,
+      "case_text": "70 year old woman with a history of multiple sclerosis since age 32. She was previously on Avonex and has been on dimethyl fumarate for 10 years. She walks with a cane for the last 15 years. She has had no change in her exam or functional status for 15 years. Her last brain and cervical MRI was 2 years ago. Her brain and cervical MRIs have been stable for 20 years. She would like to consider stopping her dimethyl fumarate if possible. What are the next steps?",
+      "rubric": [
+        "Get MRI brain/cervical with and without",
+        "Recognize low risk of exacerbation if she is stable",
+        "Stop dimethyl fumarate if stable",
+        "Needs follow up imaging in 6-12 months if drug stopped"
+      ],
+      "created_at": "2026-07-13T12:45:56Z",
+      "updated_at": "2026-07-13T12:45:56Z"
+    },
+    {
+      "case_id": "001-044",
+      "case_number": 44,
+      "case_text": "42 year old man with hypertension presents with a mild, dull, diffuse constant headache for the last 6 months. He has not been taking with antihypertensive medications. Had a generalized tonic clonic seizure in his sleep. On exam he has a right below the knee amputation due to trauma 10 years ago. BP 160/100. EEG shows left parietal slowing. MRI brain with shows 3 cm heterogenous peripheral intraaxial enhancing lesion with overlying pial enhancement and dural enhancement. There is minimal mass effect and minimal surrounding edema. What is the differential diagnosis and are the next steps?",
+      "rubric": [
+        "Start antiepileptic",
+        "HTN may be unrelated",
+        "DiffDx GBM",
+        "DiffDx lymphoma",
+        "DiffDx sarcoid high on list",
+        "DiffDx mets",
+        "DiffDx infection less likely",
+        "CT C/A/P",
+        "Brain bx if no systemic lesions"
+      ],
+      "created_at": "2026-07-13T12:47:36Z",
+      "updated_at": "2026-07-13T12:47:36Z"
+    },
+    {
+      "case_id": "001-045",
+      "case_number": 45,
+      "case_text": "What treatments are recommended treatments for neuromyelitis optica? What are specific risks?",
+      "rubric": [
+        "rituximab",
+        "satrilizumab (Enspryng)",
+        "eculizumab(Soliris)",
+        "ravalizumab(Ultomiris)",
+        "inebilizumab(Uplinza)",
+        "PML, infxn with rituximab",
+        "infxn with Uplizna",
+        "meingococcus with eculizumab, ravalizumab",
+        "infxn/elevated LE with satrilizumab"
+      ],
+      "created_at": "2026-07-13T12:48:59Z",
+      "updated_at": "2026-07-13T12:48:59Z"
+    },
+    {
+      "case_id": "001-046",
+      "case_number": 46,
+      "case_text": "54 year old man with 4 weeks of diplopia, dysarthria, and gait unsteadiness. Weight gain of 5 pounds. He has a history of asthma and hyperlipidemia. Meds: atorvastatin 40 mg and montelukast 10 mg. On exam he has mild dysarthria, bilateral end gaze nystgmus, and gait ataxia but can walk without assistance. MRI shows 6 small areas of increased T2 signal and enhancement in the bilateral pons. CBC with diff and CMP are normal. What are the next steps?",
+      "rubric": [
+        "Likely CLIPPERS",
+        "Lymphoma also possible",
+        "Recommend lumbar puncture",
+        "Treatment with oral steroids",
+        "Caution with moving to biopsy"
+      ],
+      "created_at": "2026-07-13T12:50:09Z",
+      "updated_at": "2026-07-13T12:50:09Z"
+    },
+    {
+      "case_id": "001-047",
+      "case_number": 47,
+      "case_text": "42-year-old with progressive gait unsteadiness over the last 2 months.  Exam shows an ataxic gait and left arm incoordination on finger-nose-finger.  Patient underwent MRI of the brain with contrast which shows a 3 cm ring-enhancing nodular cystic lesion in the left cerebellum with surrounding edema and slight compression of the fourth ventricle as well as a 4 cm solid enhancing lesion in the right cerebellum.  What are the next steps?",
+      "rubric": [
+        "Recognize lesions as the cause of the symptoms",
+        "Hemangioblastoma most likely diagnosis",
+        "Screen with CT chest abdomen and pelvis",
+        "Neurosurgical consultation",
+        "von Hippel-Lindau as a possible cause",
+        "Need pheochromocytoma evaluation"
+      ],
+      "created_at": "2026-07-13T12:51:58Z",
+      "updated_at": "2026-07-13T12:51:58Z"
+    },
+    {
+      "case_id": "001-048",
+      "case_number": 48,
+      "case_text": "91-year-old woman who lives alone comes in with her daughter.  Past medical history of hypertension, hyperlipidemia, remote history of lymphoma treated with chemotherapy and radiation.  Has a 3-year history of progressive gait difficulties.  She has been using a walker for the last year.  She has had a few falls at home when she is not using the walker.  She has osteoarthritis with bilateral knee pain for many years when she walks as well as mild low back pain for many years.  She has urinary incontinence when she coughs or sneezes.  On her examination her gait is slow with a narrow-base and somewhat ataxic.  Her strength and tone are normal.  She has absent vibratory sense at the toes but sensation is otherwise normal.  DTRs are 1+ throughout.  What are the next steps?",
+      "rubric": [
+        "Multifactorial gait failure with possible contributions from osteoarthritis and mild peripheral neuropathy",
+        "Needs brain/cervical imaging",
+        "Physical therapy emphasizing broad-based gait",
+        "Needs walker all of the time",
+        "Unlikely to find treatable condition to improve her gait"
+      ],
+      "created_at": "2026-07-13T12:53:21Z",
+      "updated_at": "2026-07-13T12:53:21Z"
+    },
+    {
+      "case_id": "001-049",
+      "case_number": 49,
+      "case_text": "53-year-old woman with 6-month history of left arm twitching which has been accelerating in frequency.  Her entire left arm will twitch.  There is no alteration of consciousness and she does not have twitching anywhere else.  First the episodes were infrequent but now occur every 5 to 10 seconds.  They are not changed with action and her husband says that they occur while she is asleep as well.  It is interfering with her ability to use her left hand  On examination she has single twitches of the left arm occurring every 5 to 10 seconds.  What are the next steps?",
+      "rubric": [
+        "Recognize segmental myoclonus",
+        "Epileptic seizure also possible",
+        "Order MRI brain",
+        "Order MRI cervical spine",
+        "Order EEG",
+        "Possible causes related to spinal cord lesion including tumor and syrinx"
+      ],
+      "created_at": "2026-07-13T12:54:51Z",
+      "updated_at": "2026-07-13T12:54:51Z"
+    },
+    {
+      "case_id": "001-050",
+      "case_number": 50,
+      "case_text": "The patient is a 64 year old woman with a history of PE, hypertension, and asthma. Meds include Eliquis, amlodipine, Symbicort. She has a 10 year history of progressive bilateral hand tremor, worse with action, which is interfering with handwriting, eating, and sewing. Her father had a similar tremor. On exam she has a moderate bilateral postural hand tremor which is less at rest. The tremor is not suppressible. Neuro exam is otherwise normal. What are the next steps?",
+      "rubric": [
+        "Diagnosis essential tremor",
+        "Beta blocker contraindicated due to asthma",
+        "Caution with primidone due to Eliquis",
+        "Start topiramate or other alternative"
+      ],
+      "created_at": "2026-07-13T12:58:44Z",
+      "updated_at": "2026-07-13T12:58:44Z"
     }
   ]
 }
