@@ -290,7 +290,8 @@ class DriverTests(unittest.TestCase):
 
     def test_all_sites_have_drivers_and_selectors(self):
         from llm_browser import BROWSER_MODEL_IDS
-        self.assertIn("chatgptclinicians", BROWSER_MODEL_IDS)
+        for site_id in ("chatgptclinicians", "amboss", "clinicalkeyai", "dynamed", "glasshealth"):
+            self.assertIn(site_id, BROWSER_MODEL_IDS)
         for site_id in BROWSER_MODEL_IDS:
             driver = make_driver(site_id)
             self.assertTrue(driver.home_url.startswith("https://"))
