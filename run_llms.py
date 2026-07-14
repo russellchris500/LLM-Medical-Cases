@@ -23,6 +23,7 @@ models need Playwright, which the Settings menu can install for you.
 import os
 import subprocess
 import sys
+import threading
 import time
 import random
 
@@ -184,18 +185,34 @@ def run_test_model(case):
 
 
 def run_api_phase(master, answers, settings, models, todo, ui):
+    """Collect the API answers, all providers at once.
+
+    Each API model gets its own worker thread that walks its case list
+    one question at a time (parallel questions to the SAME provider would
+    invite rate limits; different providers are independent services, so
+    running them side by side is safe and the whole phase takes only as
+    long as the slowest provider). The shared progress counter and the
+    answers file are guarded by a lock; each answer is still saved the
+    moment it arrives, so an interrupted run resumes exactly as before.
+    """
     api_models = [m for m in models if m["kind"] in ("api", "test") and todo[m["variant_id"]]]
     if not api_models:
         return
     total = sum(len(todo[m["variant_id"]]) for m in api_models)
-    ui.log("API models ({} answers to collect):".format(total))
-    done = 0
+    if len(api_models) > 1:
+        ui.log("API models ({} answers to collect, {} models running in "
+               "parallel):".format(total, len(api_models)))
+    else:
+        ui.log("API models ({} answers to collect):".format(total))
     options = settings.data["options"]
-    for model in api_models:
+    lock = threading.Lock()
+    progress = {"done": 0}
+    surprises = []  # (display_name, exception) from any worker that crashed
+
+    def run_one_model(model):
         for case_id in todo[model["variant_id"]]:
             if ui.stop_requested:
-                raise AbandonRun()
-            done += 1
+                return
             case = master.cases[case_id]
             record = new_record(
                 case, model, render_prompt(case),
@@ -216,7 +233,10 @@ def run_api_phase(master, answers, settings, models, todo, ui):
                 record.update(result)
                 record["status"] = "ok"
                 record["finished_at"] = now_iso()
-                answers.upsert(record)
+                with lock:
+                    progress["done"] += 1
+                    done = progress["done"]
+                    answers.upsert(record)
                 ui.log("  [{}/{}] {} x {} - ok ({:.1f}s)".format(
                     done, total, case_id, model["scored_as"],
                     time.monotonic() - started,
@@ -224,7 +244,10 @@ def run_api_phase(master, answers, settings, models, todo, ui):
             except ApiCallError as error:
                 record["error"] = str(error)
                 record["finished_at"] = now_iso()
-                answers.upsert(record)
+                with lock:
+                    progress["done"] += 1
+                    done = progress["done"]
+                    answers.upsert(record)
                 ui.log("  [{}/{}] {} x {} - FAILED: {}".format(
                     done, total, case_id, model["display_name"], error
                 ))
@@ -232,7 +255,30 @@ def run_api_phase(master, answers, settings, models, todo, ui):
                 ui.log("  {} is being skipped for the rest of this run: {}".format(
                     model["display_name"], error
                 ))
-                break
+                return
+            except Exception as error:  # never let one model kill the others
+                with lock:
+                    surprises.append((model["display_name"], error))
+                ui.log("  {} stopped unexpectedly: {}".format(
+                    model["display_name"], error
+                ))
+                return
+
+    workers = []
+    for model in api_models:
+        worker = threading.Thread(
+            target=run_one_model, args=(model,),
+            name="api-" + model["variant_id"], daemon=True,
+        )
+        worker.start()
+        workers.append(worker)
+    for worker in workers:
+        worker.join()
+    if ui.stop_requested:
+        raise AbandonRun()
+    if surprises:
+        display, error = surprises[0]
+        raise RuntimeError("{} hit an unexpected problem: {}".format(display, error))
 
 
 def interactive_login(driver, page, site_settings, ui):

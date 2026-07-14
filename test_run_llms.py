@@ -3,12 +3,15 @@ Run with:  python3 -m unittest test_run_llms.py"""
 
 import os
 import tempfile
+import threading
 import unittest
 
+import run_llms
 from case_editor import CaseStore
 from merge_cases import MasterStore
 from eval_common import AnswersStore, SettingsStore, model_slug
-from run_llms import build_worklist, model_catalog, new_record
+from llm_api import ModelAbort
+from run_llms import build_worklist, model_catalog, new_record, run_api_phase
 from rank_llms import build_matches, display_map
 
 
@@ -123,6 +126,117 @@ class ModelIdentityTests(unittest.TestCase):
         names = display_map(matches)
         self.assertEqual(names["claude@claude-opus-4-8"], "Anthropic Claude (claude-opus-4-8)")
         self.assertEqual(names["claude@claude-fable-5.0"], "Anthropic Claude (claude-fable-5.0)")
+
+
+class FakeUi:
+    def __init__(self):
+        self.lines = []
+        self.stop_requested = False
+
+    def log(self, message):
+        self.lines.append(message)
+
+
+def api_entry(llm_id, model_name):
+    return {
+        "model_id": llm_id,
+        "kind": "api",
+        "model_name": model_name,
+        "variant_id": model_slug(llm_id, model_name),
+        "display_name": llm_id,
+        "scored_as": "{} ({})".format(llm_id, model_name),
+    }
+
+
+class ParallelApiPhaseTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old_cwd = os.getcwd()
+        os.chdir(self.tmp.name)
+        self.settings = SettingsStore.load_or_create("settings.json")
+        provider = CaseStore(3, "provider_003_cases.json")
+        provider.add_case("Case one.", ["r1"])
+        provider.add_case("Case two.", ["r1"])
+        self.master = MasterStore("master_cases.json")
+        self.master.merge_provider(provider)
+        self.answers = AnswersStore.load_or_create("answers.json", "answer_images")
+        self.orig_call = run_llms.call_api_model
+
+    def tearDown(self):
+        run_llms.call_api_model = self.orig_call
+        os.chdir(self.old_cwd)
+        self.tmp.cleanup()
+
+    def run_phase(self, models, todo, ui=None):
+        ui = ui or FakeUi()
+        run_api_phase(self.master, self.answers, self.settings, models, todo, ui)
+        return ui
+
+    def test_two_providers_really_run_at_the_same_time(self):
+        # Both workers must arrive at the barrier together; if the models
+        # actually ran one after the other, the first would time out
+        # waiting for the second and the test would fail.
+        barrier = threading.Barrier(2, timeout=10)
+        models = [api_entry("claude", "claude-x"), api_entry("gpt", "gpt-x")]
+        todo = {m["variant_id"]: ["003-001", "003-002"] for m in models}
+        seen_threads = set()
+
+        def fake_call(model_id, entry, prompt, options, log=print, sleep=None):
+            seen_threads.add(threading.current_thread().name)
+            barrier.wait()  # both providers must be in flight at once
+            return {
+                "response_text": "Answer from " + model_id,
+                "model_requested": model_id,
+                "model_reported": model_id,
+                "attempts": 1,
+            }
+
+        run_llms.call_api_model = fake_call
+        ui = self.run_phase(models, todo)
+        self.assertEqual(len(seen_threads), 2)
+        for model in models:
+            for case_id in ("003-001", "003-002"):
+                record = self.answers.get(case_id, model["variant_id"])
+                self.assertEqual(record["status"], "ok", (case_id, model["variant_id"]))
+        # The shared counter reached the total across both workers.
+        self.assertTrue(any("[4/4]" in line for line in ui.lines))
+
+    def test_one_provider_aborting_does_not_stop_the_other(self):
+        models = [api_entry("claude", "claude-x"), api_entry("gpt", "gpt-x")]
+        todo = {m["variant_id"]: ["003-001", "003-002"] for m in models}
+
+        def fake_call(model_id, entry, prompt, options, log=print, sleep=None):
+            if model_id == "claude":
+                raise ModelAbort("bad key")
+            return {
+                "response_text": "ok", "model_requested": model_id,
+                "model_reported": model_id, "attempts": 1,
+            }
+
+        run_llms.call_api_model = fake_call
+        ui = self.run_phase(models, todo)
+        self.assertIsNone(self.answers.get("003-001", "claude@claude-x"))
+        self.assertEqual(self.answers.get("003-002", "gpt@gpt-x")["status"], "ok")
+        self.assertTrue(any("skipped for the rest of this run" in line for line in ui.lines))
+
+    def test_unexpected_crash_in_one_worker_is_reported_after_the_others_finish(self):
+        models = [api_entry("claude", "claude-x"), api_entry("gpt", "gpt-x")]
+        todo = {m["variant_id"]: ["003-001"] for m in models}
+
+        def fake_call(model_id, entry, prompt, options, log=print, sleep=None):
+            if model_id == "claude":
+                raise ValueError("boom")
+            return {
+                "response_text": "ok", "model_requested": model_id,
+                "model_reported": model_id, "attempts": 1,
+            }
+
+        run_llms.call_api_model = fake_call
+        with self.assertRaises(RuntimeError) as ctx:
+            self.run_phase(models, todo)
+        self.assertIn("boom", str(ctx.exception))
+        # The healthy provider still finished its work first.
+        self.assertEqual(self.answers.get("003-001", "gpt@gpt-x")["status"], "ok")
 
 
 if __name__ == "__main__":

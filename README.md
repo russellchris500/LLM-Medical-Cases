@@ -57,6 +57,9 @@ Used by the PI to run selected cases through selected LLMs.
 
 - **API models** (Anthropic Claude, OpenAI GPT, Google Gemini, xAI Grok) run
   unattended once an API key is entered in the in-program Settings menu.
+  All selected API models run **in parallel** (one question at a time per
+  provider, to stay inside each provider's rate limits), so the API phase
+  takes only as long as the slowest provider.
 - **Browser models with no API** (OpenEvidence, UpToDate, Doximity GPT,
   ChatGPT for Clinicians, AMBOSS, ClinicalKey AI, DynaMed, Glass Health, and
   the free no-login GPT-OSS playground at gpt-oss.com, pre-set to
