@@ -15,3 +15,5 @@ scores_*.json
 ranking_results/
 master_cases.json
 provider_*_cases.json
+case_sets.json
+
