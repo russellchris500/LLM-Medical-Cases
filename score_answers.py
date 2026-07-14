@@ -24,6 +24,7 @@ only, no other files from the project needed), so the PI can email a
 scorer just the zip and this one program.
 """
 
+import html as html_escape
 import json
 import os
 import re
@@ -33,6 +34,89 @@ import zipfile
 from datetime import datetime, timezone
 
 FORMAT_VERSION = 1
+
+HTML_PAGE_STYLE = (
+    "body{font-family:'Segoe UI',Arial,sans-serif;max-width:850px;"
+    "margin:2em auto;padding:0 1em;line-height:1.5;color:#222}"
+    "pre{background:#f4f4f4;padding:10px;overflow-x:auto}"
+    "code{background:#f4f4f4;padding:1px 4px}"
+    "h2,h3,h4{margin:1.2em 0 0.4em}"
+)
+
+
+def markdown_to_html(text, title="Answer"):
+    """A small renderer for the markdown-style text the models produce
+    (headings, **bold**, `code`, bullet and numbered lists, fenced code
+    blocks, simple | tables), so an answer can be read formatted in a web
+    browser instead of as a wall of symbols. (Copied from eval_common.py;
+    this program must stay self-contained.)"""
+
+    def inline(s):
+        s = html_escape.escape(s, quote=False)
+        s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
+        s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
+        return s
+
+    out = []
+    mode = [None]  # None | "ul" | "ol" | "pre" | "table"
+
+    def close():
+        if mode[0] in ("ul", "ol"):
+            out.append("</{}>".format(mode[0]))
+        elif mode[0] in ("pre", "table"):
+            out.append("</pre>")
+        mode[0] = None
+
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if mode[0] == "pre" and not stripped.startswith("```"):
+            out.append(html_escape.escape(line))
+            continue
+        if stripped.startswith("```"):
+            if mode[0] == "pre":
+                close()
+            else:
+                close()
+                out.append("<pre>")
+                mode[0] = "pre"
+            continue
+        heading = re.match(r"(#{1,4})\s+(.+)", stripped)
+        if heading:
+            close()
+            level = min(len(heading.group(1)) + 1, 4)
+            out.append("<h{0}>{1}</h{0}>".format(level, inline(heading.group(2))))
+            continue
+        if re.match(r"[-*•]\s+", stripped):
+            if mode[0] != "ul":
+                close()
+                out.append("<ul>")
+                mode[0] = "ul"
+            out.append("<li>{}</li>".format(inline(re.sub(r"^[-*•]\s+", "", stripped))))
+            continue
+        if re.match(r"\d+[.)]\s+", stripped):
+            if mode[0] != "ol":
+                close()
+                out.append("<ol>")
+                mode[0] = "ol"
+            out.append("<li>{}</li>".format(inline(re.sub(r"^\d+[.)]\s+", "", stripped))))
+            continue
+        if stripped.startswith("|"):
+            if mode[0] != "table":
+                close()
+                out.append("<pre>")
+                mode[0] = "table"
+            out.append(html_escape.escape(line))
+            continue
+        if not stripped:
+            close()
+            continue
+        close()
+        out.append("<p>{}</p>".format(inline(stripped)))
+    close()
+    return (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'><title>{}</title>"
+        "<style>{}</style></head><body>{}</body></html>"
+    ).format(html_escape.escape(title), HTML_PAGE_STYLE, "\n".join(out))
 
 
 def now_iso():
@@ -427,6 +511,11 @@ if TK_AVAILABLE:
             self.images_button = tk.Button(
                 answer_row, text="Open the images", command=self.open_images
             )
+            self.formatted_button = tk.Button(
+                answer_row, text="Read formatted (web browser)",
+                command=self.open_formatted,
+            )
+            self.formatted_button.pack(side="right", padx=(0, 6))
             self.answer_text = scrolledtext.ScrolledText(
                 right, height=9, wrap="word", state="disabled"
             )
@@ -653,6 +742,24 @@ if TK_AVAILABLE:
             )
 
         # ---- actions ----
+
+        def open_formatted(self):
+            """The current answer, rendered readable in the web browser."""
+            if self.index is None:
+                return
+            case, answer = self.entries[self.index]
+            out_dir = "formatted_answers"
+            os.makedirs(out_dir, exist_ok=True)
+            path = os.path.join(
+                out_dir, "{}_{}.html".format(case["case_id"], answer["label"])
+            )
+            document = markdown_to_html(
+                answer.get("response_text", "") or "(no text)",
+                title="Case {} - answer {}".format(case["case_id"], answer["label"]),
+            )
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(document)
+            webbrowser.open("file:///" + os.path.abspath(path).replace(os.sep, "/"))
 
         def open_images(self):
             case, answer = self.entries[self.index]

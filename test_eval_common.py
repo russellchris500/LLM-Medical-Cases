@@ -12,9 +12,38 @@ from eval_common import (
     SelectionError,
     SettingsStore,
     case_hash,
+    markdown_to_html,
     parse_selection,
     sort_case_ids,
 )
+
+
+class MarkdownToHtmlTests(unittest.TestCase):
+    def test_common_answer_markup_is_rendered(self):
+        html = markdown_to_html(
+            "## Assessment\n"
+            "The patient has **severe** hyponatremia.\n\n"
+            "- check `sodium`\n"
+            "- restrict fluids\n"
+            "1. admit\n"
+            "2) monitor\n"
+            "```\nNa 118\n```\n"
+            "| test | value |\n",
+            title="003-001",
+        )
+        self.assertIn("<h3>Assessment</h3>", html)
+        self.assertIn("<b>severe</b>", html)
+        self.assertIn("<li>check <code>sodium</code></li>", html)
+        self.assertIn("<ol>", html)
+        self.assertIn("<li>monitor</li>", html)
+        self.assertIn("Na 118", html)
+        self.assertIn("| test | value |", html)
+        self.assertIn("<title>003-001</title>", html)
+
+    def test_html_in_the_answer_is_escaped_not_executed(self):
+        html = markdown_to_html("<script>alert(1)</script> & so on")
+        self.assertNotIn("<script>", html)
+        self.assertIn("&lt;script&gt;", html)
 
 
 def fake_master(ids):

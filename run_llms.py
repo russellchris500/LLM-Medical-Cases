@@ -36,6 +36,7 @@ from eval_common import (
     SelectionError,
     SettingsStore,
     case_hash,
+    markdown_to_html,
     model_slug,
     parse_selection,
     sort_case_ids,
@@ -134,6 +135,7 @@ def new_record(case, model, prompt_sent, deep_thinking=True):
         "prompt_sent": prompt_sent,
         "response_text": "",
         "images": [],
+        "answer_html": None,
         "status": "failed",
         "error": None,
         "case_sha256": case_hash(case),
@@ -510,6 +512,8 @@ def run_browser_site(master, answers, settings, model, case_ids, ui):
                     continue
                 record["response_text"] = result.text
                 record["images"] = [p.replace(os.sep, "/") for p in result.image_paths]
+                if getattr(result, "html_path", None):
+                    record["answer_html"] = result.html_path.replace(os.sep, "/")
                 record["model_requested"] = model["model_name"] or model["display_name"]
                 record["model_reported"] = result.model_reported
                 record["status"] = "ok_manual" if result.manual else "ok"
@@ -1025,6 +1029,25 @@ class RunnerApp:
                 (record.get("error") or "")[:80],
             ))
 
+    def open_formatted_answer(self, case_id, model_id, record):
+        """Show the answer with its formatting in the default web browser:
+        the saved site HTML when there is one, otherwise the answer text
+        rendered from its markdown."""
+        import webbrowser
+
+        path = record.get("answer_html")
+        if not (path and os.path.exists(path)):
+            os.makedirs("formatted_answers", exist_ok=True)
+            safe = "".join(c if c.isalnum() or c in "-._@" else "-" for c in model_id)
+            path = os.path.join("formatted_answers", "{}_{}.html".format(case_id, safe))
+            document = markdown_to_html(
+                record.get("response_text") or "(no text was captured)",
+                title="{} - {}".format(case_id, record.get("model_display_name", model_id)),
+            )
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(document)
+        webbrowser.open("file:///" + os.path.abspath(path).replace(os.sep, "/"))
+
     def forget_answer(self):
         selection = self.answers_tree.selection()
         if not selection:
@@ -1079,6 +1102,11 @@ class RunnerApp:
             record.get("started_at"),
         )
         tk.Label(window, text=info, anchor="w").pack(fill="x", padx=8, pady=(8, 0))
+        tk.Button(
+            window,
+            text="Open formatted in your web browser",
+            command=lambda: self.open_formatted_answer(case_id, model_id, record),
+        ).pack(anchor="w", padx=8, pady=(4, 0))
         text = self.gc.readonly_text(window, height=24)
         text.pack(fill="both", expand=True, padx=8, pady=8)
         body = record.get("response_text") or "(no text; error: {})".format(record.get("error"))

@@ -543,11 +543,13 @@ def sniff_image_extension(data, content_type="", src=""):
 
 
 class BrowserAnswer:
-    def __init__(self, text, image_paths, model_reported, manual=False):
+    def __init__(self, text, image_paths, model_reported, manual=False, html_path=None):
         self.text = text
         self.image_paths = image_paths
         self.model_reported = model_reported
         self.manual = manual
+        # A saved copy of the answer's real HTML, for formatted reading.
+        self.html_path = html_path
 
 
 class SiteDriver:
@@ -846,6 +848,7 @@ class SiteDriver:
                 line for line in diff_text.splitlines()
                 if line not in prompt_lines
             )
+        container_missed = False
         if diff_text.strip():
             container_lines = set(text.splitlines())
             missed = [
@@ -854,6 +857,7 @@ class SiteDriver:
             ]
             if missed:
                 text = diff_text
+                container_missed = True
         if not text.strip():
             try:
                 body = surface.query_selector("body")
@@ -909,13 +913,43 @@ class SiteDriver:
         except Exception:
             pass
 
+        # Save the answer's real HTML too, so it can be READ with its
+        # formatting (headings, bold, tables) in a web browser. When the
+        # container missed the answer, the whole document is kept instead.
+        html_path = None
+        html_source = container
+        if html_source is None or container_missed:
+            try:
+                html_source = surface.query_selector("body")
+            except Exception:
+                html_source = None
+        if html_source is not None:
+            try:
+                html = html_source.evaluate("e => e.outerHTML") or ""
+            except Exception:
+                html = ""
+            if html.strip():
+                html_path = os.path.join(images_dir, "{}_answer.html".format(basename))
+                document = (
+                    "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+                    "<title>{} answer</title><base href=\"{}\"></head>"
+                    "<body>{}</body></html>"
+                ).format(self.display_name, self.home_url, html)
+                try:
+                    with open(html_path, "w", encoding="utf-8") as f:
+                        f.write(document)
+                except OSError:
+                    html_path = None
+
         if not text.strip():
             raise BrowserStepError(
                 "extraction",
                 "no answer text could be read from the page (a full-page "
                 "screenshot was saved)",
             )
-        return BrowserAnswer(text, image_paths, self.model_reported(), manual=manual)
+        return BrowserAnswer(
+            text, image_paths, self.model_reported(), manual=manual, html_path=html_path
+        )
 
 
 class OpenEvidenceDriver(SiteDriver):

@@ -8,6 +8,7 @@ answers.json
 answer_images/
 browser_profiles/
 site_diagnostics/
+formatted_answers/
 scoring_packages/
 site_selectors.json
 scores_*.json

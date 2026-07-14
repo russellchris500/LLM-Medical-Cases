@@ -47,6 +47,8 @@ class FakeElement:
         return self.attrs.get(name)
 
     def evaluate(self, script):
+        if "outerHTML" in script:
+            return self.attrs.get("html", "")
         if "currentSrc" in script and "fetch" not in script:
             return self.attrs.get("src", "")
         if "fetch" in script:
@@ -302,6 +304,23 @@ class IframeTests(unittest.TestCase):
             "First words of the answer",
             driver.current_answer_text(page, baseline),
         )
+
+    def test_extract_saves_the_answer_html_for_formatted_reading(self):
+        import tempfile as _tempfile
+        driver = make_driver("openevidence")
+        driver.ready_timeout_s = 0
+        container = FakeElement(
+            text="The answer.",
+            attrs={"html": "<div><h2>Assessment</h2><b>The answer.</b></div>"},
+        )
+        page = FakePage({"main": [container]})
+        with _tempfile.TemporaryDirectory() as tmp:
+            answer = driver.extract_answer(page, tmp, "x")
+            self.assertTrue(answer.html_path)
+            with open(answer.html_path, encoding="utf-8") as f:
+                saved = f.read()
+        self.assertIn("<b>The answer.</b>", saved)
+        self.assertIn("<base href=", saved)  # relative site images still resolve
 
     def test_added_text_finds_only_new_lines(self):
         from llm_browser import added_text
