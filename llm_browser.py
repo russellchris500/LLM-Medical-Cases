@@ -855,7 +855,17 @@ class SiteDriver:
                 line for line in diff_text.splitlines()
                 if line.strip() and line not in container_lines
             ]
-            if missed:
+            # Chat pages always gain a little chrome outside the answer
+            # (a new sidebar title, a "said:" label); that must not throw
+            # away a good container capture. The diff only wins when the
+            # container missed MORE than it holds - e.g. it shows just the
+            # echoed question while the whole answer streamed elsewhere.
+            prompt_lines = set(prompt_text.splitlines()) if prompt_text else set()
+            container_content = sum(
+                len(line) for line in text.splitlines()
+                if line.strip() and line not in prompt_lines
+            )
+            if missed and sum(len(line) for line in missed) > container_content:
                 text = diff_text
                 container_missed = True
         if not text.strip():

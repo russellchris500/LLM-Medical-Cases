@@ -305,6 +305,26 @@ class IframeTests(unittest.TestCase):
             driver.current_answer_text(page, baseline),
         )
 
+    def test_small_page_noise_does_not_replace_a_good_container_capture(self):
+        # ChatGPT-style pages: the assistant-message container holds the
+        # whole answer, but the page also gains a sidebar title. That
+        # noise must not make capture discard the clean container text.
+        import tempfile as _tempfile
+        driver = make_driver("chatgptclinicians")
+        driver.ready_timeout_s = 0
+        answer_text = "The likely diagnosis is X. " * 10
+        container = FakeElement(text=answer_text)
+        page = FakePage(
+            {"#prompt-textarea": [FakeElement()],
+             "[data-message-author-role='assistant']": [container]},
+            deep_text="chrome",
+        )
+        driver.baseline_text(page)
+        page.deep_text = "chrome\nNew chat title\n" + answer_text
+        with _tempfile.TemporaryDirectory() as tmp:
+            answer = driver.extract_answer(page, tmp, "x")
+        self.assertEqual(answer.text, answer_text)  # container capture kept
+
     def test_extract_saves_the_answer_html_for_formatted_reading(self):
         import tempfile as _tempfile
         driver = make_driver("openevidence")

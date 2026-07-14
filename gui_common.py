@@ -29,6 +29,28 @@ def make_root(title, width=980, height=680):
     return root
 
 
+def bring_to_front(window):
+    """Force a window above everything else - during a browser run the
+    automation browser covers the screen, and a question dialog opening
+    BEHIND it looks exactly like the program freezing (the worker waits
+    forever for an answer the user cannot see)."""
+    try:
+        window.deiconify()
+        window.lift()
+        window.attributes("-topmost", True)
+        window.focus_force()
+        window.bell()
+    except Exception:
+        pass
+
+
+def drop_topmost(window):
+    try:
+        window.attributes("-topmost", False)
+    except Exception:
+        pass
+
+
 def show_error(title, message, parent=None):
     messagebox.showerror(title, message, parent=parent)
 
@@ -67,6 +89,7 @@ def pick_from_list(parent, title, question, options):
     row.pack(pady=(4, PAD))
     tk.Button(row, text="OK", width=10, command=accept).pack(side="left", padx=4)
     tk.Button(row, text="Cancel", width=10, command=dialog.destroy).pack(side="left", padx=4)
+    bring_to_front(dialog)
     dialog.wait_window()
     return chosen[0] if chosen else None
 
@@ -97,6 +120,7 @@ def ask_choice(parent, title, message, options):
             buttons, text=label, width=max(12, len(label) + 2),
             command=lambda k=key: pick(k),
         ).pack(side="left", padx=4)
+    bring_to_front(dialog)
     dialog.wait_window()
     return chosen[0] if chosen else None
 
@@ -252,6 +276,8 @@ class BackgroundTask:
     def _answer(self, request):
         kind = request["kind"]
         payload = request["payload"]
+        # A worker question must never hide behind the automation browser.
+        bring_to_front(self.root)
         try:
             if kind == "info":
                 messagebox.showinfo(payload[0], payload[1], parent=self.root)
@@ -266,4 +292,5 @@ class BackgroundTask:
             traceback.print_exc()
             request["answer"] = None
         finally:
+            drop_topmost(self.root)
             request["done"].set()
