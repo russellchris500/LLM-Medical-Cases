@@ -100,11 +100,17 @@ class FakeKeyboard:
 class FakePage:
     """Selector map: selector string -> list of FakeElements."""
 
-    def __init__(self, elements=None):
+    def __init__(self, elements=None, deep_text=None):
         self.elements = elements or {}
         self.keyboard = FakeKeyboard()
         self.goto_urls = []
         self.screenshots = []
+        self.deep_text = deep_text  # returned by evaluate() when set
+
+    def evaluate(self, script):
+        if self.deep_text is None:
+            raise RuntimeError("no deep text in this fake")
+        return self.deep_text
 
     def goto(self, url, wait_until=None, timeout=None):
         self.goto_urls.append(url)
@@ -224,6 +230,42 @@ class IframeTests(unittest.TestCase):
         with _tempfile.TemporaryDirectory() as tmp:
             answer = driver.extract_answer(page, tmp, "x")
         self.assertEqual(answer.text, "The clinical answer.")
+
+    def test_diff_capture_when_no_container_selector_fits(self):
+        # The site's answer area matches none of our selectors: capture
+        # falls back to "whatever text was added to the page since just
+        # before the question was sent", minus the echoed question.
+        import tempfile as _tempfile
+        from llm_browser import added_text
+        driver = make_driver("gptoss")
+        driver.ready_timeout_s = 0
+        page = FakePage(
+            {"textarea": [FakeElement()]},
+            deep_text="gpt-oss playground\nDownload the model",
+        )
+        baseline = driver.baseline_text(page)  # snapshots the deep text
+        self.assertEqual(baseline, "")  # no container matches
+        page.deep_text = (
+            "gpt-oss playground\nWhat is the diagnosis?\n"
+            "The likely diagnosis is X.\nDownload the model"
+        )
+        self.assertIn(
+            "The likely diagnosis is X.",
+            driver.current_answer_text(page, baseline),
+        )
+        with _tempfile.TemporaryDirectory() as tmp:
+            answer = driver.extract_answer(
+                page, tmp, "x", baseline=baseline,
+                prompt_text="What is the diagnosis?",
+            )
+        self.assertEqual(answer.text, "The likely diagnosis is X.")
+
+    def test_added_text_finds_only_new_lines(self):
+        from llm_browser import added_text
+        before = "header\nold line\nfooter"
+        after = "header\nold line\nBRAND NEW\nfooter"
+        self.assertEqual(added_text(before, after), "BRAND NEW")
+        self.assertEqual(added_text(before, before), "")
 
     def test_describe_page_reports_each_frame(self):
         from llm_browser import describe_page

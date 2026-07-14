@@ -23,6 +23,7 @@ Design notes:
 
 import base64
 import copy
+import difflib
 import json
 import os
 import time
@@ -440,6 +441,37 @@ _DESCRIBE_JS = """() => {
 }"""
 
 
+# Every piece of text on the page, including inside shadow DOM widgets
+# that innerText cannot see into.
+_DEEP_TEXT_JS = """() => {
+    const parts = [];
+    const scan = (scope) => {
+        for (const el of scope.querySelectorAll('*')) {
+            if (el.shadowRoot) {
+                parts.push(el.shadowRoot.textContent || '');
+                scan(el.shadowRoot);
+            }
+        }
+    };
+    parts.push(document.body ? (document.body.innerText || '') : '');
+    if (document.body) scan(document.body);
+    return parts.join('\\n');
+}"""
+
+
+def added_text(before, after):
+    """The lines of `after` that were not in `before` - the streamed-in
+    answer, on pages where no container selector fits."""
+    before_lines = before.splitlines()
+    after_lines = after.splitlines()
+    matcher = difflib.SequenceMatcher(None, before_lines, after_lines, autojunk=False)
+    added = []
+    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+        if tag in ("insert", "replace"):
+            added.extend(after_lines[j1:j2])
+    return "\n".join(line for line in added if line.strip())
+
+
 def describe_page(page, path):
     """Write a plain-text report of what the page is showing (each frame
     and its input-like elements). When a site check misbehaves, this file
@@ -535,6 +567,9 @@ class SiteDriver:
         # page content before concluding it isn't there.
         self.ready_timeout_s = 25
         self.ready_poll_s = 0.5
+        # Snapshot of ALL page text taken just before a question is sent,
+        # for the diff-based capture fallback (see current_answer_text).
+        self._deep_baseline = ""
 
     def wait_until_ready(self, page, sleep=time.sleep, clock=time.monotonic):
         """Wait until the page has actually drawn a question box or a login
@@ -611,9 +646,21 @@ class SiteDriver:
         _, surface = find_first_located(page, self.selectors["question_box"])
         return surface if surface is not None else page
 
+    def deep_text(self, page):
+        """All text on every surface, including shadow DOM content."""
+        parts = []
+        for surface in _search_surfaces(page):
+            try:
+                parts.append(surface.evaluate(_DEEP_TEXT_JS) or "")
+            except Exception:
+                continue
+        return "\n".join(parts)
+
     def baseline_text(self, page):
         """Text already on the page, so old content is never mistaken for
-        the new answer."""
+        the new answer. Also snapshots the whole page's text for the
+        diff-based capture fallback."""
+        self._deep_baseline = self.deep_text(page)
         surface = self.chat_surface(page)
         container = find_first(surface, self.selectors["answer_container"])
         if container is None:
@@ -651,15 +698,20 @@ class SiteDriver:
     def current_answer_text(self, page, baseline):
         surface = self.chat_surface(page)
         container = find_first(surface, self.selectors["answer_container"])
-        if container is None:
-            return ""
-        try:
-            text = container.inner_text()
-        except Exception:
-            return ""
+        text = ""
+        if container is not None:
+            try:
+                text = container.inner_text()
+            except Exception:
+                text = ""
         if text == baseline:
-            return ""
-        return text
+            text = ""
+        if text:
+            return text
+        # Fallback: no container selector fits this site - watch ALL page
+        # text instead and treat whatever has been added since the
+        # question was sent as the answer.
+        return added_text(self._deep_baseline, self.deep_text(page))
 
     def wait_for_answer(
         self,
@@ -752,7 +804,8 @@ class SiteDriver:
             pass
         return None, None
 
-    def extract_answer(self, page, images_dir, basename, baseline="", manual=False):
+    def extract_answer(self, page, images_dir, basename, baseline="", manual=False,
+                       prompt_text=""):
         surface = self.chat_surface(page)
         container = find_first(surface, self.selectors["answer_container"])
         text = ""
@@ -761,6 +814,20 @@ class SiteDriver:
                 text = container.inner_text()
             except Exception:
                 text = ""
+        if baseline and text == baseline:
+            text = ""
+        if not text.strip():
+            # Diff fallback: whatever text was added anywhere on the page
+            # since just before the question was sent. The echoed question
+            # itself is dropped from it.
+            diff_text = added_text(self._deep_baseline, self.deep_text(page))
+            if prompt_text:
+                prompt_lines = set(prompt_text.splitlines())
+                diff_text = "\n".join(
+                    line for line in diff_text.splitlines()
+                    if line not in prompt_lines
+                )
+            text = diff_text
         if not text.strip():
             try:
                 body = surface.query_selector("body")

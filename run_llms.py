@@ -366,7 +366,9 @@ def manual_capture(driver, page, prompt_text, images_dir, basename, ui):
             "send it, wait for the FULL answer, then click OK to capture it."
         )
     ui.tell("Your turn in the browser", message)
-    return driver.extract_answer(page, images_dir, basename, manual=True)
+    return driver.extract_answer(
+        page, images_dir, basename, manual=True, prompt_text=prompt_text
+    )
 
 
 def browser_ask_one(driver, page, case, prompt_text, images_dir, basename, options):
@@ -379,7 +381,9 @@ def browser_ask_one(driver, page, case, prompt_text, images_dir, basename, optio
         stable_seconds=options.get("answer_stable_seconds", 10),
         max_wait_seconds=options.get("answer_max_wait_seconds", 300),
     )
-    return driver.extract_answer(page, images_dir, basename, baseline=baseline)
+    return driver.extract_answer(
+        page, images_dir, basename, baseline=baseline, prompt_text=prompt_text
+    )
 
 
 def run_browser_site(master, answers, settings, model, case_ids, ui):
