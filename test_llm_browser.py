@@ -173,6 +173,10 @@ class FakeFrame:
         self.elements = elements
         self.url = url
 
+    def query_selector(self, selector):
+        matches = self.elements.get(selector, [])
+        return matches[0] if matches else None
+
     def query_selector_all(self, selector):
         return self.elements.get(selector, [])
 
@@ -201,6 +205,25 @@ class IframeTests(unittest.TestCase):
         driver.ready_timeout_s = 0
         page = FramedPage([FakeFrame({}), FakeFrame({"textarea": [FakeElement()]})])
         self.assertTrue(driver.is_logged_in(page))
+
+    def test_answer_is_read_from_the_frame_holding_the_chat(self):
+        # The outer page shell also has a body/main, but the answer only
+        # ever appears in the frame where the question box lives; reading
+        # the shell captured nothing (the gpt-oss.com bug).
+        import tempfile as _tempfile
+        driver = make_driver("gptoss")
+        driver.ready_timeout_s = 0
+        shell = FakeFrame({"main": [FakeElement(text="Download gpt-oss!")]},
+                          url="https://gpt-oss.com/")
+        chat = FakeFrame({
+            "textarea": [FakeElement()],
+            "main": [FakeElement(text="The clinical answer.")],
+        }, url="https://chat.example/")
+        page = FramedPage([shell, chat])
+        self.assertEqual(driver.baseline_text(page), "The clinical answer.")
+        with _tempfile.TemporaryDirectory() as tmp:
+            answer = driver.extract_answer(page, tmp, "x")
+        self.assertEqual(answer.text, "The clinical answer.")
 
     def test_describe_page_reports_each_frame(self):
         from llm_browser import describe_page

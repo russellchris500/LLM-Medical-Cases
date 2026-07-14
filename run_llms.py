@@ -442,6 +442,7 @@ def run_browser_site(master, answers, settings, model, case_ids, ui):
                                 basename, options,
                             )
                     except BrowserStepError as error:
+                        save_site_diagnostics(driver, page, ui)
                         options_list = [
                             ("retry", "Retry automatically"),
                             ("manual", "I will do it by hand"),

@@ -390,34 +390,54 @@ def _search_surfaces(page):
     return [page]
 
 
-def find_first(page, selector_list):
-    """Return the first visible element matching any selector, searching
-    the page and any iframes, or None."""
+def find_first_located(page, selector_list):
+    """Return (element, surface) for the first visible element matching
+    any selector, searching the page and any iframes; (None, None) if
+    nothing matches. The surface is the page or frame the element lives
+    in, so later lookups can stay inside the same document."""
     surfaces = _search_surfaces(page)
     for selector in selector_list:
         for surface in surfaces:
             try:
                 for element in surface.query_selector_all(selector):
                     if element.is_visible():
-                        return element
+                        return element, surface
             except Exception:
                 continue
-    return None
+    return None, None
 
 
-_DESCRIBE_JS = """() => Array.from(
-    document.querySelectorAll(
+def find_first(page, selector_list):
+    """Return the first visible element matching any selector, searching
+    the page and any iframes, or None."""
+    element, _ = find_first_located(page, selector_list)
+    return element
+
+
+_DESCRIBE_JS = """() => {
+    const rows = [];
+    Array.from(document.querySelectorAll(
         "textarea, input, [contenteditable], [role='textbox'], button, form"
-    )
-).slice(0, 80).map(e => [
-    e.tagName.toLowerCase(),
-    e.getAttribute('type') || '',
-    e.id || '',
-    e.getAttribute('placeholder') || '',
-    e.getAttribute('aria-label') || '',
-    e.getAttribute('data-testid') || '',
-    (e.offsetWidth || e.offsetHeight) ? 'visible' : 'hidden',
-].join(' | '))"""
+    )).slice(0, 80).forEach(e => rows.push([
+        e.tagName.toLowerCase(),
+        e.getAttribute('type') || '',
+        e.id || '',
+        e.getAttribute('placeholder') || '',
+        e.getAttribute('aria-label') || '',
+        e.getAttribute('data-testid') || '',
+        (e.offsetWidth || e.offsetHeight) ? 'visible' : 'hidden',
+    ].join(' | ')));
+    rows.push('--- content areas (tag | class | text length) ---');
+    Array.from(document.querySelectorAll(
+        "main, article, [class*='answer' i], [class*='response' i], " +
+        "[class*='message' i], [class*='chat' i]"
+    )).slice(0, 80).forEach(e => rows.push([
+        e.tagName.toLowerCase(),
+        String(e.className || '').slice(0, 70),
+        String((e.innerText || '').length) + ' chars',
+    ].join(' | ')));
+    return rows;
+}"""
 
 
 def describe_page(page, path):
@@ -583,10 +603,19 @@ class SiteDriver:
             except Exception:
                 pass
 
+    def chat_surface(self, page):
+        """The page or iframe that actually holds the chat. Generic
+        answer selectors like 'main' or 'body' also match the outer page
+        shell on sites that embed their chat in a frame, so the answer
+        must always be read from the same document as the question box."""
+        _, surface = find_first_located(page, self.selectors["question_box"])
+        return surface if surface is not None else page
+
     def baseline_text(self, page):
         """Text already on the page, so old content is never mistaken for
         the new answer."""
-        container = find_first(page, self.selectors["answer_container"])
+        surface = self.chat_surface(page)
+        container = find_first(surface, self.selectors["answer_container"])
         if container is None:
             return ""
         try:
@@ -620,7 +649,8 @@ class SiteDriver:
             raise BrowserStepError("submit", "could not send the question ({})".format(e))
 
     def current_answer_text(self, page, baseline):
-        container = find_first(page, self.selectors["answer_container"])
+        surface = self.chat_surface(page)
+        container = find_first(surface, self.selectors["answer_container"])
         if container is None:
             return ""
         try:
@@ -723,7 +753,8 @@ class SiteDriver:
         return None, None
 
     def extract_answer(self, page, images_dir, basename, baseline="", manual=False):
-        container = find_first(page, self.selectors["answer_container"])
+        surface = self.chat_surface(page)
+        container = find_first(surface, self.selectors["answer_container"])
         text = ""
         if container is not None:
             try:
@@ -732,7 +763,7 @@ class SiteDriver:
                 text = ""
         if not text.strip():
             try:
-                body = page.query_selector("body")
+                body = surface.query_selector("body")
                 text = body.inner_text() if body is not None else ""
             except Exception:
                 text = ""
@@ -741,7 +772,7 @@ class SiteDriver:
 
         os.makedirs(images_dir, exist_ok=True)
         image_paths = []
-        scope = container if container is not None else page
+        scope = container if container is not None else surface
         counter = 0
         for selector in self.selectors["answer_images"]:
             try:
