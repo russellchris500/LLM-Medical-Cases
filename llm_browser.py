@@ -696,6 +696,14 @@ class SiteDriver:
             raise BrowserStepError("submit", "could not send the question ({})".format(e))
 
     def current_answer_text(self, page, baseline):
+        """The combined 'what has appeared so far' signal.
+
+        Both the container text AND all text added anywhere on the page
+        are included: on some sites the container only ever shows the
+        echoed question while the real answer streams into an element no
+        selector matches - judged on the container alone, the page looks
+        'stable' seconds after submitting and the wait ends while the
+        model is still writing."""
         surface = self.chat_surface(page)
         container = find_first(surface, self.selectors["answer_container"])
         text = ""
@@ -706,12 +714,10 @@ class SiteDriver:
                 text = ""
         if text == baseline:
             text = ""
-        if text:
-            return text
-        # Fallback: no container selector fits this site - watch ALL page
-        # text instead and treat whatever has been added since the
-        # question was sent as the answer.
-        return added_text(self._deep_baseline, self.deep_text(page))
+        diff_text = added_text(self._deep_baseline, self.deep_text(page))
+        if diff_text:
+            text = (text + "\n" + diff_text) if text else diff_text
+        return text
 
     def wait_for_answer(
         self,
@@ -816,18 +822,25 @@ class SiteDriver:
                 text = ""
         if baseline and text == baseline:
             text = ""
-        if not text.strip():
-            # Diff fallback: whatever text was added anywhere on the page
-            # since just before the question was sent. The echoed question
-            # itself is dropped from it.
-            diff_text = added_text(self._deep_baseline, self.deep_text(page))
-            if prompt_text:
-                prompt_lines = set(prompt_text.splitlines())
-                diff_text = "\n".join(
-                    line for line in diff_text.splitlines()
-                    if line not in prompt_lines
-                )
-            text = diff_text
+        # Whatever text was added anywhere on the page since just before
+        # the question was sent (the echoed question itself is dropped).
+        # If the page gained answer text the container never showed, the
+        # container missed the answer - trust the page diff instead.
+        diff_text = added_text(self._deep_baseline, self.deep_text(page))
+        if prompt_text and diff_text:
+            prompt_lines = set(prompt_text.splitlines())
+            diff_text = "\n".join(
+                line for line in diff_text.splitlines()
+                if line not in prompt_lines
+            )
+        if diff_text.strip():
+            container_lines = set(text.splitlines())
+            missed = [
+                line for line in diff_text.splitlines()
+                if line.strip() and line not in container_lines
+            ]
+            if missed:
+                text = diff_text
         if not text.strip():
             try:
                 body = surface.query_selector("body")

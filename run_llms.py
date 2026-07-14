@@ -445,6 +445,36 @@ def run_browser_site(master, answers, settings, model, case_ids, ui):
                                 driver, page, case, prompt_text, images_dir,
                                 basename, options,
                             )
+                        # First case on each site: show what was captured,
+                        # so a silent mis-capture (wrong element, cut-off
+                        # answer) is caught before the whole run repeats it.
+                        if result is not None and index == 1 and not result.manual:
+                            snippet = (result.text or "").strip()
+                            if len(snippet) > 500:
+                                snippet = snippet[:500] + "\n[...answer continues...]"
+                            verdict = ui.ask_choice(
+                                "First {} answer - does it look right?".format(
+                                    model["display_name"]
+                                ),
+                                "This is the captured text for {} (check it against "
+                                "the browser window):\n\n{}".format(case_id, snippet),
+                                [
+                                    ("ok", "Looks right - continue"),
+                                    ("manual", "Wrong - redo this case by hand"),
+                                    ("abandon", "Wrong - set this site aside"),
+                                ],
+                            )
+                            if verdict == "manual":
+                                save_site_diagnostics(driver, page, ui)
+                                result = None
+                                mode_manual = True
+                                continue
+                            if verdict == "abandon":
+                                save_site_diagnostics(driver, page, ui)
+                                ui.log("  Set {} aside for this run.".format(
+                                    model["display_name"]
+                                ))
+                                return
                     except BrowserStepError as error:
                         save_site_diagnostics(driver, page, ui)
                         options_list = [

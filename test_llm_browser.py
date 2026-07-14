@@ -260,6 +260,32 @@ class IframeTests(unittest.TestCase):
             )
         self.assertEqual(answer.text, "The likely diagnosis is X.")
 
+    def test_capture_when_container_only_echoes_the_question(self):
+        # The gpt-oss.com failure mode: the matched container shows the
+        # echoed question and then never changes, while the real answer
+        # streams into an element no selector matches. The wait signal
+        # must keep seeing the streaming text, and extraction must not
+        # settle for the echo.
+        import tempfile as _tempfile
+        driver = make_driver("gptoss")
+        driver.ready_timeout_s = 0
+        convo = FakeElement(text="")
+        page = FakePage(
+            {"textarea": [FakeElement()], "main": [convo]}, deep_text="chrome"
+        )
+        baseline = driver.baseline_text(page)
+        self.assertEqual(baseline, "")
+        convo.text = "What is the diagnosis?"  # the echo, then frozen
+        page.deep_text = "chrome\nWhat is the diagnosis?\nThe answer is X."
+        current = driver.current_answer_text(page, baseline)
+        self.assertIn("The answer is X.", current)  # streaming still visible
+        with _tempfile.TemporaryDirectory() as tmp:
+            answer = driver.extract_answer(
+                page, tmp, "x", baseline=baseline,
+                prompt_text="What is the diagnosis?",
+            )
+        self.assertEqual(answer.text, "The answer is X.")
+
     def test_added_text_finds_only_new_lines(self):
         from llm_browser import added_text
         before = "header\nold line\nfooter"
