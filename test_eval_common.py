@@ -161,7 +161,7 @@ class SettingsTests(unittest.TestCase):
         store = SettingsStore.load_or_create(self.path)
         self.assertEqual(store.api_model("claude")["api_key"], "sk-x")
         self.assertEqual(store.api_model("claude")["model"], "")
-        self.assertEqual(store.option("answer_stable_seconds"), 10)
+        self.assertEqual(store.option("answer_stable_seconds"), 20)
 
 
 class AnswersTests(unittest.TestCase):
@@ -202,6 +202,23 @@ class AnswersTests(unittest.TestCase):
             self.store.answered_case_ids(ok_only=False),
             ["003-001", "003-002", "003-003"],
         )
+
+    def test_forget_removes_answer_and_its_images(self):
+        os.makedirs(self.images)
+        image = os.path.join(self.images, "003-001_claude_001.png")
+        other = os.path.join(self.images, "003-001_gpt_001.png")
+        for p in (image, other):
+            with open(p, "wb") as f:
+                f.write(b"x")
+        self.store.upsert(self.record("003-001", "claude"))
+        self.store.upsert(self.record("003-001", "gpt"))
+        self.assertTrue(self.store.forget("003-001", "claude"))
+        self.assertFalse(self.store.forget("003-001", "claude"))  # already gone
+        self.assertFalse(os.path.exists(image))
+        self.assertTrue(os.path.exists(other))
+        reloaded = AnswersStore.load_or_create(self.path, self.images)
+        self.assertIsNone(reloaded.get("003-001", "claude"))
+        self.assertIsNotNone(reloaded.get("003-001", "gpt"))
 
     def test_clear_images_only_touches_the_pair(self):
         os.makedirs(self.images)

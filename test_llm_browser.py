@@ -286,6 +286,23 @@ class IframeTests(unittest.TestCase):
             )
         self.assertEqual(answer.text, "The answer is X.")
 
+    def test_question_echo_alone_does_not_look_like_an_answer(self):
+        # A model can think silently for a long time after the question
+        # echo appears; the echo must not start the "answer is stable"
+        # clock, or slow cases get cut off mid-thought.
+        driver = make_driver("gptoss")
+        driver.ready_timeout_s = 0
+        page = FakePage({"textarea": [FakeElement()]}, deep_text="chrome")
+        baseline = driver.baseline_text(page)
+        driver.submit_question(page, "What is the diagnosis?")
+        page.deep_text = "chrome\nWhat is the diagnosis?"
+        self.assertEqual(driver.current_answer_text(page, baseline), "")
+        page.deep_text = "chrome\nWhat is the diagnosis?\nFirst words of the answer"
+        self.assertIn(
+            "First words of the answer",
+            driver.current_answer_text(page, baseline),
+        )
+
     def test_added_text_finds_only_new_lines(self):
         from llm_browser import added_text
         before = "header\nold line\nfooter"

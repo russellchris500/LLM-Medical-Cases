@@ -992,6 +992,11 @@ class RunnerApp:
         tk.Button(row, text="View the selected answer", command=self.view_answer).pack(
             side="left", padx=6
         )
+        tk.Button(
+            row,
+            text="Forget the selected answer (ask again next run)",
+            command=self.forget_answer,
+        ).pack(side="left", padx=6)
         self.answers_tree = self.gc.make_table(
             frame,
             [("case", "Case"), ("model", "LLM"), ("status", "Status"),
@@ -1019,6 +1024,39 @@ class RunnerApp:
                 (record.get("started_at") or "")[:16].replace("T", " "),
                 (record.get("error") or "")[:80],
             ))
+
+    def forget_answer(self):
+        selection = self.answers_tree.selection()
+        if not selection:
+            self.gui.messagebox.showinfo(
+                "Nothing selected", "Click an answer in the table first.", parent=self.root
+            )
+            return
+        if self.task.running or self.settings_task.running:
+            self.gui.messagebox.showinfo(
+                "Busy", "Please wait for the current job to finish first.",
+                parent=self.root,
+            )
+            return
+        case_id, model_id = selection[0].split("|", 1)
+        record = self.answers.get(case_id, model_id)
+        if record is None:
+            return
+        if not self.gui.messagebox.askyesno(
+            "Forget this answer?",
+            "Forget the {} answer for case {}?\n\nThe saved text and images are "
+            "deleted, and the case will be asked again the next time this LLM "
+            "is run. Use this when an answer was captured badly.".format(
+                record.get("model_display_name", model_id), case_id
+            ),
+            parent=self.root,
+        ):
+            return
+        self.answers.forget(case_id, model_id)
+        self.refresh_answers_tab()
+        self.run_log.log("Forgot the {} answer for {} - it will be asked again "
+                         "next run.".format(record.get("model_display_name", model_id),
+                                            case_id))
 
     def view_answer(self):
         selection = self.answers_tree.selection()

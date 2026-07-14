@@ -570,6 +570,9 @@ class SiteDriver:
         # Snapshot of ALL page text taken just before a question is sent,
         # for the diff-based capture fallback (see current_answer_text).
         self._deep_baseline = ""
+        # The question last submitted, so its echo in the chat is never
+        # mistaken for the beginning of an answer.
+        self._last_prompt = ""
 
     def wait_until_ready(self, page, sleep=time.sleep, clock=time.monotonic):
         """Wait until the page has actually drawn a question box or a login
@@ -671,6 +674,7 @@ class SiteDriver:
             return ""
 
     def submit_question(self, page, prompt_text, sleep=time.sleep, clock=time.monotonic):
+        self._last_prompt = prompt_text
         self.wait_until_ready(page, sleep=sleep, clock=clock)
         if find_first(page, self.selectors["login_form"]) is not None:
             raise BrowserStepError("logged_out", "the site is showing a login form")
@@ -717,6 +721,15 @@ class SiteDriver:
         diff_text = added_text(self._deep_baseline, self.deep_text(page))
         if diff_text:
             text = (text + "\n" + diff_text) if text else diff_text
+        # The echoed question appears within a second of submitting; if it
+        # counted as "the answer has started", a model that thinks quietly
+        # for a while would look finished before writing a single word.
+        if text and self._last_prompt:
+            prompt_lines = set(self._last_prompt.splitlines())
+            text = "\n".join(
+                line for line in text.splitlines()
+                if line.strip() and line not in prompt_lines
+            )
         return text
 
     def wait_for_answer(

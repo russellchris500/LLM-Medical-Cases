@@ -307,7 +307,10 @@ DEFAULT_SETTINGS = {
         "request_timeout_s": 180,
         "max_retries": 5,
         "browser_question_delay_s": 8,
-        "answer_stable_seconds": 10,
+        # How long the page must stop changing before an answer counts as
+        # finished. Reasoning models can pause mid-answer while thinking,
+        # so this errs on the patient side.
+        "answer_stable_seconds": 20,
         "answer_max_wait_seconds": 300,
         "enable_test_model": False,
     },
@@ -416,6 +419,15 @@ class AnswersStore:
     def upsert(self, record):
         self.answers[(record["case_id"], record["model_id"])] = record
         self.save()
+
+    def forget(self, case_id, model_id):
+        """Drop one answer (and its images) so the pair is asked again on
+        the next run - the escape hatch for a badly captured answer."""
+        removed = self.answers.pop((case_id, model_id), None)
+        if removed is not None:
+            self.clear_images(case_id, model_id)
+            self.save()
+        return removed is not None
 
     def model_ids(self):
         return sorted({model_id for _, model_id in self.answers})
