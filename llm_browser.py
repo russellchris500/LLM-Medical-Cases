@@ -376,16 +376,69 @@ def load_selectors(path=SELECTOR_OVERRIDE_FILE):
     return selectors
 
 
-def find_first(page, selector_list):
-    """Return the first visible element matching any selector, or None."""
-    for selector in selector_list:
+def _search_surfaces(page):
+    """The page plus every iframe in it - some sites build their whole
+    chat UI inside a frame, where a plain page query finds nothing."""
+    frames = getattr(page, "frames", None)
+    if frames:
         try:
-            for element in page.query_selector_all(selector):
-                if element.is_visible():
-                    return element
+            surfaces = list(frames)  # includes the main frame
+            if surfaces:
+                return surfaces
         except Exception:
-            continue
+            pass
+    return [page]
+
+
+def find_first(page, selector_list):
+    """Return the first visible element matching any selector, searching
+    the page and any iframes, or None."""
+    surfaces = _search_surfaces(page)
+    for selector in selector_list:
+        for surface in surfaces:
+            try:
+                for element in surface.query_selector_all(selector):
+                    if element.is_visible():
+                        return element
+            except Exception:
+                continue
     return None
+
+
+_DESCRIBE_JS = """() => Array.from(
+    document.querySelectorAll(
+        "textarea, input, [contenteditable], [role='textbox'], button, form"
+    )
+).slice(0, 80).map(e => [
+    e.tagName.toLowerCase(),
+    e.getAttribute('type') || '',
+    e.id || '',
+    e.getAttribute('placeholder') || '',
+    e.getAttribute('aria-label') || '',
+    e.getAttribute('data-testid') || '',
+    (e.offsetWidth || e.offsetHeight) ? 'visible' : 'hidden',
+].join(' | '))"""
+
+
+def describe_page(page, path):
+    """Write a plain-text report of what the page is showing (each frame
+    and its input-like elements). When a site check misbehaves, this file
+    is everything a helper needs to fix the selectors remotely."""
+    lines = []
+    for index, surface in enumerate(_search_surfaces(page)):
+        try:
+            url = surface.url
+        except Exception:
+            url = "(unknown)"
+        lines.append("--- frame {}: {}".format(index, url))
+        lines.append("    tag | type | id | placeholder | aria-label | data-testid | visible")
+        try:
+            for row in surface.evaluate(_DESCRIBE_JS):
+                lines.append("    " + row)
+        except Exception as e:
+            lines.append("    (could not inspect this frame: {})".format(e))
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
 
 
 EXT_FOR_MIME = {

@@ -168,6 +168,52 @@ class SelectorOverrideTests(unittest.TestCase):
         self.assertEqual(selectors, DEFAULT_SELECTORS)
 
 
+class FakeFrame:
+    def __init__(self, elements, url="https://frame/"):
+        self.elements = elements
+        self.url = url
+
+    def query_selector_all(self, selector):
+        return self.elements.get(selector, [])
+
+    def evaluate(self, script):
+        return []
+
+
+class FramedPage(FakePage):
+    """A page whose content lives inside iframes, like sites that build
+    their chat UI in a frame."""
+
+    def __init__(self, frames):
+        super().__init__({})
+        self.frames = frames
+
+
+class IframeTests(unittest.TestCase):
+    def test_find_first_searches_inside_iframes(self):
+        from llm_browser import find_first
+        box = FakeElement()
+        page = FramedPage([FakeFrame({}), FakeFrame({"textarea": [box]})])
+        self.assertIs(find_first(page, ["textarea"]), box)
+
+    def test_is_logged_in_sees_composer_in_iframe(self):
+        driver = make_driver("gptoss")
+        driver.ready_timeout_s = 0
+        page = FramedPage([FakeFrame({}), FakeFrame({"textarea": [FakeElement()]})])
+        self.assertTrue(driver.is_logged_in(page))
+
+    def test_describe_page_reports_each_frame(self):
+        from llm_browser import describe_page
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "report.txt")
+            describe_page(FramedPage([FakeFrame({}, url="https://a/"),
+                                      FakeFrame({}, url="https://b/")]), path)
+            with open(path, encoding="utf-8") as f:
+                report = f.read()
+        self.assertIn("frame 0: https://a/", report)
+        self.assertIn("frame 1: https://b/", report)
+
+
 class LateRenderingPage(FakePage):
     """A page that draws its elements only after a few lookups, like a
     site that renders everything with JavaScript after navigation."""

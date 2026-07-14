@@ -148,6 +148,45 @@ def api_entry(llm_id, model_name):
     }
 
 
+class TrustLoginTests(unittest.TestCase):
+    def test_continue_anyway_skips_the_login_check(self):
+        # The login check is a heuristic; when the user says they are
+        # logged in, their word wins and the run proceeds.
+        from run_llms import interactive_login
+
+        class StubbornDriver:
+            display_name = "GPT-OSS Playground"
+            site_id = "gptoss"
+            login_url = home_url = "https://example/"
+
+            def wait_until_ready(self, page):
+                pass
+
+            def autofill_login(self, page, username, password):
+                pass
+
+            def is_logged_in(self, page):
+                return False  # the check never believes the user
+
+        class StubPage:
+            def goto(self, *args, **kwargs):
+                pass
+
+            def screenshot(self, **kwargs):
+                raise RuntimeError("no screenshots in tests")
+
+        class TrustUi(FakeUi):
+            def ask_choice(self, title, message, options):
+                assert any(key == "trust" for key, _ in options)
+                return "trust"
+
+        entry = {}
+        self.assertTrue(
+            interactive_login(StubbornDriver(), StubPage(), entry, TrustUi())
+        )
+        self.assertTrue(entry.get("last_login_ok"))
+
+
 class ParallelApiPhaseTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

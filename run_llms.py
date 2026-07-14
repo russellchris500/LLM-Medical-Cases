@@ -48,6 +48,7 @@ from llm_browser import (
     BrowserStepError,
     SITE_INFO,
     copy_to_clipboard,
+    describe_page,
     make_driver,
     open_site_context,
 )
@@ -300,11 +301,21 @@ def interactive_login(driver, page, site_settings, ui):
             "safe, use the site's own email-and-password (or emailed code)\n"
             "sign-in instead of the \"Continue with Google\" button - you only\n"
             "need to do this once; the login is remembered afterwards.\n\n"
-            "When you can see the normal question page, click Continue.".format(
-                driver.display_name
-            ),
-            [("check", "Continue - I am logged in"), ("stop", "Stop / skip this site")],
+            "When you can see the normal question page, click Continue.\n"
+            "If the program keeps disagreeing even though you ARE logged in,\n"
+            "choose \"Continue anyway\".".format(driver.display_name),
+            [
+                ("check", "Continue - I am logged in"),
+                ("trust", "Continue anyway - skip the login check"),
+                ("stop", "Stop / skip this site"),
+            ],
         )
+        if choice == "trust":
+            # The check is only a convenience; the user's word wins. If the
+            # site is truly logged out, submitting the first question will
+            # say so and offer the usual recovery choices.
+            site_settings["last_login_ok"] = now_iso()
+            return True
         if choice != "check":
             return False
         try:
@@ -315,6 +326,27 @@ def interactive_login(driver, page, site_settings, ui):
             site_settings["last_login_ok"] = now_iso()
             return True
         ui.log("  It doesn't look logged in yet - please finish in the browser window.")
+        save_site_diagnostics(driver, page, ui)
+
+
+def save_site_diagnostics(driver, page, ui):
+    """A text report + screenshot of what the program can see on the site,
+    for fixing selector problems remotely. Best effort only."""
+    try:
+        os.makedirs("site_diagnostics", exist_ok=True)
+        base = os.path.join(
+            "site_diagnostics",
+            "{}_{}".format(driver.site_id, time.strftime("%Y%m%d_%H%M%S")),
+        )
+        describe_page(page, base + ".txt")
+        try:
+            page.screenshot(path=base + ".png", full_page=True)
+        except Exception:
+            pass
+        ui.log("  (What the program can see was saved to {} - send that file "
+               "for help if this keeps happening.)".format(base + ".txt"))
+    except Exception:
+        pass
 
 
 def manual_capture(driver, page, prompt_text, images_dir, basename, ui):
