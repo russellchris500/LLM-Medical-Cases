@@ -1071,8 +1071,25 @@ class RunnerApp:
         self.settings.save()
         self.refresh_settings_rows()
 
-    def test_api(self, model_id):
+    def browser_busy(self):
+        """One browser/test job runs at a time; say so instead of silently
+        ignoring the click."""
         if self.settings_task.running or self.task.running:
+            self.gui.messagebox.showinfo(
+                "One thing at a time",
+                "Another browser window or test is still busy (for example, a "
+                "login that is waiting for you, or a test that is still "
+                "running).\n\nPlease finish that one first - answer its "
+                "message box, or wait for it to end - and then try again. "
+                "Recent activity is shown in the log at the bottom of this "
+                "window.",
+                parent=self.root,
+            )
+            return True
+        return False
+
+    def test_api(self, model_id):
+        if self.browser_busy():
             return
         options = dict(self.settings.data["options"])
         options["max_retries"] = 1
@@ -1145,7 +1162,7 @@ class RunnerApp:
                 parent=self.root,
             )
             return
-        if self.settings_task.running or self.task.running:
+        if self.browser_busy():
             return
 
         def work(ui):
@@ -1185,7 +1202,7 @@ class RunnerApp:
             parent=self.root,
         ):
             return
-        if self.settings_task.running or self.task.running:
+        if self.browser_busy():
             return
 
         def work(ui):
