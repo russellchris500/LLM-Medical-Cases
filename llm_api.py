@@ -121,6 +121,41 @@ def anthropic_thinking_mode(model):
     return "adaptive" if (major, minor) >= (4, 6) else "budget"
 
 
+def thinking_description(model_id, model, deep_thinking=True):
+    """A plain-language summary of the thinking level a call asks for,
+    matching exactly what build_request puts in the request body - shown
+    in the Test button output and the run log, and saved with every
+    answer, so the study can verify every model ran with deep thinking."""
+    entry = API_REGISTRY[model_id]
+    style = entry["style"]
+    if style == "anthropic":
+        mode = anthropic_thinking_mode(model)
+        if mode == "always":
+            if deep_thinking:
+                return "always-on thinking, effort '{}'".format(entry["thinking_effort"])
+            return "always-on thinking (cannot be turned off), provider-default effort"
+        if mode == "adaptive":
+            if deep_thinking:
+                return "adaptive thinking, effort '{}'".format(entry["thinking_effort"])
+            return "no thinking requested (provider default)"
+        if deep_thinking and entry.get("thinking_budget"):
+            return "extended thinking, budget {} tokens".format(entry["thinking_budget"])
+        return "thinking off"
+    if style == "openai":
+        if entry.get("reasoning_effort"):
+            if deep_thinking:
+                return "reasoning effort '{}'".format(entry["reasoning_effort"])
+            return "no effort setting sent (provider default)"
+        return "the model always reasons deeply (no effort setting exists)"
+    if style == "gemini":
+        if deep_thinking and entry.get("thinking_budget") is not None:
+            if entry["thinking_budget"] == -1:
+                return "dynamic thinking (the model decides how long to think)"
+            return "thinking budget {} tokens".format(entry["thinking_budget"])
+        return "thinking off"
+    return "unknown"
+
+
 def build_request(model_id, api_key, model, prompt_text, temperature=0, deep_thinking=True):
     """Return (url, headers, body_dict) for one question.
 
@@ -268,12 +303,9 @@ def call_api_model(model_id, settings_entry, prompt_text, options, log=print, sl
             )
         )
     model = resolve_model(model_id, settings_entry)
+    deep_thinking = options.get("deep_thinking", True)
     url, headers, body = build_request(
-        model_id,
-        api_key,
-        model,
-        prompt_text,
-        deep_thinking=options.get("deep_thinking", True),
+        model_id, api_key, model, prompt_text, deep_thinking=deep_thinking
     )
     payload = json.dumps(body).encode("utf-8")
     timeout = options.get("request_timeout_s", 180)
@@ -294,6 +326,7 @@ def call_api_model(model_id, settings_entry, prompt_text, options, log=print, sl
                 "model_requested": model,
                 "model_reported": reported or model,
                 "attempts": attempts,
+                "thinking_setting": thinking_description(model_id, model, deep_thinking),
             }
         except urllib.error.HTTPError as e:
             detail = _error_detail(e.read())

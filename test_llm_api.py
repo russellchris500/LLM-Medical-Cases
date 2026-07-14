@@ -179,6 +179,22 @@ class ApiTests(unittest.TestCase):
         # grok-4 reasons by default and accepts no effort parameter.
         self.assertNotIn("reasoning_effort", body)
 
+    def test_thinking_description_matches_request_dialect(self):
+        from llm_api import thinking_description
+        self.assertIn("budget 10000", thinking_description("claude", "claude-sonnet-4-5"))
+        self.assertIn(
+            "adaptive thinking, effort 'high'",
+            thinking_description("claude", "claude-opus-4-8"),
+        )
+        self.assertIn("always-on thinking", thinking_description("claude", "claude-fable-5"))
+        self.assertIn("reasoning effort 'high'", thinking_description("gpt", "gpt-5"))
+        self.assertIn("dynamic thinking", thinking_description("gemini", "gemini-2.5-pro"))
+        self.assertIn("always reasons", thinking_description("grok", "grok-4"))
+        self.assertEqual(
+            thinking_description("claude", "claude-sonnet-4-5", deep_thinking=False),
+            "thinking off",
+        )
+
     # ----- response parsing -----
 
     def test_parse_all_styles(self):
@@ -235,6 +251,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(result["model_requested"], "claude-sonnet-4-5")
         self.assertEqual(result["model_reported"], "claude-real")
         self.assertEqual(result["attempts"], 1)
+        # The thinking level used is recorded with every answer.
+        self.assertIn("budget 10000", result["thinking_setting"])
 
     def test_settings_model_override(self):
         result, fake = self.call(

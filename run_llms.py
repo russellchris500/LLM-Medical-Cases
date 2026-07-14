@@ -42,7 +42,15 @@ from eval_common import (
     sort_case_ids,
     split_case_id,
 )
-from llm_api import API_MODEL_IDS, API_REGISTRY, ApiCallError, ModelAbort, call_api_model, resolve_model
+from llm_api import (
+    API_MODEL_IDS,
+    API_REGISTRY,
+    ApiCallError,
+    ModelAbort,
+    call_api_model,
+    resolve_model,
+    thinking_description,
+)
 import llm_browser
 from llm_browser import (
     BROWSER_MODEL_IDS,
@@ -213,6 +221,15 @@ def run_api_phase(master, answers, settings, models, todo, ui):
     surprises = []  # (display_name, exception) from any worker that crashed
 
     def run_one_model(model):
+        if model["kind"] == "api":
+            ui.log("  {} thinking: {}".format(
+                model["scored_as"],
+                thinking_description(
+                    model["model_id"],
+                    resolve_model(model["model_id"], settings.api_model(model["model_id"])),
+                    bool(settings.option("deep_thinking")),
+                ),
+            ))
         for case_id in todo[model["variant_id"]]:
             if ui.stop_requested:
                 return
@@ -1101,6 +1118,8 @@ class RunnerApp:
             record.get("model_reported") or record.get("model_requested"),
             record.get("started_at"),
         )
+        if record.get("thinking_setting"):
+            info += "\nThinking: {}".format(record["thinking_setting"])
         tk.Label(window, text=info, anchor="w").pack(fill="x", padx=8, pady=(8, 0))
         tk.Button(
             window,
@@ -1275,6 +1294,12 @@ class RunnerApp:
         entry = self.settings.api_model(model_id)
         display = API_REGISTRY[model_id]["display_name"]
         self.settings_log.log("Contacting {}...".format(display))
+        self.settings_log.log("  Thinking level: {}".format(
+            thinking_description(
+                model_id, resolve_model(model_id, entry),
+                bool(self.settings.option("deep_thinking")),
+            )
+        ))
 
         def work(ui):
             return call_api_model(
