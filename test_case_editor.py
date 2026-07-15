@@ -133,6 +133,18 @@ class CaseStoreTests(unittest.TestCase):
         with self.assertRaises(CaseStoreError):
             CaseStore.load(self.path)
 
+    def test_rubric_edit_bumps_rubric_version(self):
+        store = CaseStore(3, self.path)
+        case = store.add_case("Text.", ["r1", "r2"])
+        self.assertEqual(case["rubric_version"], 1)
+        store.update_case(1, case_text="New text.")  # text-only: no bump
+        self.assertEqual(store.get_case(1)["rubric_version"], 1)
+        store.update_case(1, rubric=["r1 fixed", "r2"])
+        self.assertEqual(store.get_case(1)["rubric_version"], 2)
+        store.save()
+        reloaded = CaseStore.load(self.path)
+        self.assertEqual(reloaded.get_case(1)["rubric_version"], 2)
+
     def test_load_rejects_invalid_json(self):
         with open(self.path, "w", encoding="utf-8") as f:
             f.write("{not json")

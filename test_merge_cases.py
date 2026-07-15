@@ -6,7 +6,11 @@ import tempfile
 import unittest
 
 from case_editor import FORMAT_VERSION, CaseStore, CaseStoreError
-from merge_cases import MasterStore
+from merge_cases import (
+    MasterStore,
+    read_rubric_flags,
+    rubric_update_payload,
+)
 
 
 def make_provider(tmpdir, provider_number, cases):
@@ -162,6 +166,88 @@ class MergeTests(unittest.TestCase):
     def test_load_or_create_on_missing_file(self):
         store = MasterStore.load_or_create(self.master_path)
         self.assertEqual(store.cases, {})
+
+
+class RubricEditTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir_obj = tempfile.TemporaryDirectory()
+        self.tmpdir = self.tmpdir_obj.name
+        self.master = MasterStore(os.path.join(self.tmpdir, "master_cases.json"))
+        provider = make_provider(
+            self.tmpdir, 3, [("Case A", ["i1", "i2", "i3"]), ("Case B", ["b1"])]
+        )
+        self.master.merge_provider(provider)
+
+    def tearDown(self):
+        self.tmpdir_obj.cleanup()
+
+    def test_edit_bumps_version_and_keeps_history(self):
+        case = self.master.edit_rubric(
+            "003-001", ["i1", "i3"],
+            ops={"removed": [1], "reworded": [], "added": []},
+            reason="item 2 was too hard",
+        )
+        self.assertEqual(case["rubric_version"], 2)
+        self.assertEqual(case["rubric"], ["i1", "i3"])
+        entry = case["rubric_history"][-1]
+        self.assertEqual(entry["from_version"], 1)
+        self.assertEqual(entry["old_rubric"], ["i1", "i2", "i3"])
+        self.assertEqual(entry["ops"]["removed"], [1])
+        self.assertEqual(entry["reason"], "item 2 was too hard")
+        # Round-trips through save/load.
+        self.master.save()
+        reloaded = MasterStore.load(self.master.path)
+        self.assertEqual(reloaded.cases["003-001"]["rubric_version"], 2)
+        self.assertEqual(len(reloaded.cases["003-001"]["rubric_history"]), 1)
+
+    def test_edit_rejects_empty_and_ignores_no_change(self):
+        with self.assertRaises(CaseStoreError):
+            self.master.edit_rubric("003-001", [])
+        case = self.master.edit_rubric("003-001", ["i1", "i2", "i3"])
+        self.assertEqual(case["rubric_version"], 1)  # unchanged rubric, no bump
+
+    def test_provider_re_merge_keeps_versions_monotonic(self):
+        # PI fixes the rubric (v2); the provider, unaware, sends their own
+        # newer edit. The merged case must not fall back to a lower version.
+        self.master.edit_rubric("003-001", ["i1", "i3"], reason="PI fix")
+        provider = CaseStore.load(
+            os.path.join(self.tmpdir, "provider_003_cases.json")
+        )
+        provider.update_case(1, rubric=["i1", "i2 clarified", "i3"])  # their v2
+        provider.save()
+        report = self.master.merge_provider(provider, on_conflict=lambda a, b: True)
+        self.assertIn("003-001", report["updated"])
+        self.assertEqual(self.master.cases["003-001"]["rubric_version"], 3)
+
+    def test_rubric_update_payload_carries_ops(self):
+        self.master.edit_rubric(
+            "003-001", ["i1", "i3"],
+            ops={"removed": [1], "reworded": [], "added": []}, reason="too hard",
+        )
+        payload = rubric_update_payload(self.master, ["003-001"])
+        self.assertEqual(payload["kind"], "rubric_update")
+        entry = payload["cases"][0]
+        self.assertEqual(entry["case_id"], "003-001")
+        self.assertEqual(entry["rubric"], ["i1", "i3"])
+        self.assertEqual(entry["rubric_version"], 2)
+        self.assertEqual(entry["from_version"], 1)
+        self.assertEqual(entry["ops"]["removed"], [1])
+
+    def test_read_rubric_flags_from_scores_files(self):
+        path = os.path.join(self.tmpdir, "scores_pkg.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({
+                "format_version": 1, "scorer": "CR",
+                "rubric_flags": [
+                    {"case_id": "003-001", "item_index": 1,
+                     "item_text": "i2", "note": "too strict"},
+                ],
+            }, f)
+        flags, problems = read_rubric_flags([path])
+        self.assertEqual(problems, [])
+        self.assertEqual(flags[0]["case_id"], "003-001")
+        self.assertEqual(flags[0]["scorer"], "CR")
+        self.assertEqual(flags[0]["note"], "too strict")
 
 
 if __name__ == "__main__":

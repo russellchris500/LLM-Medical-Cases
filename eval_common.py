@@ -49,9 +49,27 @@ def load_json(path, what):
 
 
 def case_hash(case):
-    """Fingerprint of the parts of a case an LLM answer depends on."""
+    """Legacy combined fingerprint (case text + rubric). Kept so answers
+    recorded before the fingerprint was split still compare correctly."""
     material = case["case_text"] + "\n" + "\n".join(case["rubric"])
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def text_hash(case):
+    """Fingerprint of what the LLMs actually see: the case text alone.
+    Only a change here means the models must be re-asked."""
+    return hashlib.sha256(case["case_text"].encode("utf-8")).hexdigest()
+
+
+def rubric_hash(case):
+    """Fingerprint of the rubric alone. A change here affects grading
+    (re-grade), never the collected answers."""
+    return hashlib.sha256("\n".join(case["rubric"]).encode("utf-8")).hexdigest()
+
+
+def rubric_version(case):
+    value = case.get("rubric_version")
+    return value if isinstance(value, int) and value >= 1 else 1
 
 
 def split_case_id(case_id):

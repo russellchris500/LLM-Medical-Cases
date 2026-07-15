@@ -157,6 +157,38 @@ class BuildMatchesTests(unittest.TestCase):
         self.assertEqual(len(warnings), 1)
         self.assertIn("no matching key", warnings[0])
 
+    def test_stale_rubric_version_grades_are_refused(self):
+        # Answer A was graded before the PI's rubric fix, B after it (the
+        # scorer re-graded B under version 2). A must not be ranked until
+        # re-graded - even though the key file still says version 1,
+        # because keys go stale the moment a rubric update goes out.
+        records = [
+            {"case_id": "003-001", "label": "A", "score": 2, "rubric_version": 1},
+            {"case_id": "003-001", "label": "B", "score": 0, "rubric_version": 2},
+        ]
+        matches, warnings = build_matches(
+            [self.scores_file(records=records)], self.KEYS,
+            rubric_versions={"pkg_1": {"003-001": 1}},
+        )
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["model_id"], "gpt")  # B survived
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("rubric version 1", warnings[0])
+        self.assertIn("re-graded", warnings[0])
+
+    def test_master_database_version_is_authoritative(self):
+        # Every grade is version 1 and internally consistent, but the
+        # master says the rubric is on version 2: nothing ranks until the
+        # scorer re-grades.
+        matches, warnings = build_matches(
+            [self.scores_file()], self.KEYS,
+            rubric_versions={"pkg_1": {"003-001": 1, "003-002": 1}},
+            current_versions={"003-001": 2},
+        )
+        case_ids = {m["case_id"] for m in matches}
+        self.assertEqual(case_ids, {"003-002"})
+        self.assertEqual(len(warnings), 2)  # both 003-001 grades refused
+
     def test_missing_label_and_bad_score_warn_individually(self):
         records = [
             {"case_id": "003-001", "label": "Z", "score": 2},

@@ -113,6 +113,10 @@ def blind_cases(package_cases, answers_by_case):
                 "case_id": case_id,
                 "case_text": case["case_text"],
                 "rubric": list(case["rubric"]),
+                # Grades record which rubric version they were made under,
+                # so a later rubric fix can invalidate exactly the grades
+                # it affects (and the ranker can refuse mixed versions).
+                "rubric_version": case.get("rubric_version", 1),
                 "answers": entry_answers,
             }
         )
@@ -164,6 +168,7 @@ def write_package_zip(zip_path, manifest_cases, package_meta, warn):
                         "case_id": case["case_id"],
                         "case_text": case["case_text"],
                         "rubric": case["rubric"],
+                        "rubric_version": case.get("rubric_version", 1),
                         "answers": cleaned_answers,
                     }
                 )
@@ -200,6 +205,40 @@ def self_identification_warnings(manifest_cases):
     return warnings
 
 
+def stale_package_warnings(master, out_dir=PACKAGES_DIR):
+    """Which earlier packages contain a rubric that has since been edited.
+    Scorers holding those zips need the PI's rubric update file."""
+    warnings = []
+    try:
+        names = sorted(os.listdir(out_dir))
+    except OSError:
+        return warnings
+    for name in names:
+        if not name.endswith("_KEY_DO_NOT_SEND.json"):
+            continue
+        try:
+            with open(os.path.join(out_dir, name), "r", encoding="utf-8") as f:
+                key_data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        stale = []
+        for case_id, packaged_version in (key_data.get("rubric_versions") or {}).items():
+            case = master.cases.get(case_id)
+            if case is not None and case.get("rubric_version", 1) > packaged_version:
+                stale.append("{} (v{} -> v{})".format(
+                    case_id, packaged_version, case.get("rubric_version", 1)
+                ))
+        if stale:
+            warnings.append(
+                "Package '{}' was built with older rubrics: {}. Send its scorer "
+                "a rubric update file (Case Merger > Save a rubric update "
+                "file).".format(
+                    key_data.get("package_name", name), ", ".join(sorted(stale))
+                )
+            )
+    return warnings
+
+
 def build_package(name, case_ids, model_ids, master, answers, out_dir=PACKAGES_DIR, warn=print):
     """Assemble, blind, and write one package. Returns (zip_path, key_path)."""
     answers_by_case = {}
@@ -233,6 +272,11 @@ def build_package(name, case_ids, model_ids, master, answers, out_dir=PACKAGES_D
         "package_id": package_id,
         "package_name": name,
         "created_at": meta["created_at"],
+        # Which rubric version each case was packaged with: the ranker
+        # checks grades against this so mixed-rubric grades never rank.
+        "rubric_versions": {
+            case["case_id"]: case.get("rubric_version", 1) for case in manifest_cases
+        },
         "key": key,
     }
     with open(key_path, "w", encoding="utf-8") as f:
@@ -241,6 +285,8 @@ def build_package(name, case_ids, model_ids, master, answers, out_dir=PACKAGES_D
 
     for warning in self_identification_warnings(manifest["cases"]):
         warn("Blinding note: " + warning)
+    for warning in stale_package_warnings(master, out_dir):
+        warn("Rubric note: " + warning)
     return zip_path, key_path
 
 

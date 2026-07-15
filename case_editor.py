@@ -116,6 +116,16 @@ class CaseStore:
             "case_number": case_number,
             "case_text": case_text,
             "rubric": list(rubric),
+            # Bumped every time the rubric's content changes, so grades can
+            # record WHICH rubric they were made against.
+            "rubric_version": (
+                raw["rubric_version"]
+                if isinstance(raw.get("rubric_version"), int) and raw["rubric_version"] >= 1
+                else 1
+            ),
+            "rubric_history": (
+                list(raw["rubric_history"]) if isinstance(raw.get("rubric_history"), list) else []
+            ),
             "created_at": raw.get("created_at", now_iso()),
             "updated_at": raw.get("updated_at", now_iso()),
         }
@@ -163,6 +173,8 @@ class CaseStore:
             "case_number": number,
             "case_text": case_text,
             "rubric": rubric,
+            "rubric_version": 1,
+            "rubric_history": [],
             "created_at": timestamp,
             "updated_at": timestamp,
         }
@@ -176,6 +188,9 @@ class CaseStore:
         new_text = case["case_text"] if case_text is None else case_text
         new_rubric = case["rubric"] if rubric is None else rubric
         new_text, new_rubric = self._check_content(new_text, new_rubric)
+        if new_rubric != case["rubric"]:
+            # Any change to the rubric's content is a new rubric version.
+            case["rubric_version"] = int(case.get("rubric_version", 1)) + 1
         case["case_text"] = new_text
         case["rubric"] = new_rubric
         case["updated_at"] = now_iso()

@@ -50,6 +50,20 @@ single master database (`master_cases.json`).
 - Supports re-importing an updated file from a provider: for a changed case
   the PI is prompted (defaulting to the newer `updated_at` version), and
   cases the provider deleted are kept unless the PI confirms removal.
+- **Mid-study rubric fixes.** Scorers can flag a rubric item as too
+  difficult or wrong (the flag travels back inside their scores file);
+  the PI reviews flags here and edits the rubric (reword / remove / add
+  items). Every edit bumps the case's **rubric version**, is kept in a
+  per-case audit history, and can be exported as a small
+  `rubric_update_*.json` file to email to scorers. Their scorer program
+  applies it automatically and re-queues **only the grades the change
+  actually affects** (an added or reworded item re-queues the whole case;
+  a removed item re-queues only answers that missed it — other grades are
+  carried over unchanged). Rubric edits never re-run the LLMs (the models
+  only ever see the case text), and the ranker refuses any grade made
+  under an outdated rubric version, so every model on a case is always
+  judged by the same rubric. Remember to tell the provider about the fix
+  so their own file matches.
 
 ### Program 3 — LLM Runner (`run_llms.py`) ✅ implemented
 

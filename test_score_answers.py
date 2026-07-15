@@ -15,8 +15,12 @@ from score_answers import (
     Package,
     PackageError,
     ScoresStore,
+    apply_rubric_updates,
     compute_score,
     find_package_zips,
+    find_rubric_updates,
+    grade_survives_removal,
+    load_rubric_updates,
     scores_path_for,
 )
 
@@ -208,6 +212,136 @@ class ScoreAnswersTests(unittest.TestCase):
     def test_scores_path_naming(self):
         self.assertEqual(scores_path_for("pilot-scorer.zip"), "scores_pilot-scorer.json")
         self.assertEqual(scores_path_for("PKG.ZIP"), "scores_PKG.json")
+
+
+class RubricUpdateTests(unittest.TestCase):
+    """A PI rubric fix arriving at the scorer as a rubric_update file."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old_cwd = os.getcwd()
+        os.chdir(self.tmp.name)
+        manifest = {
+            "package_id": "pkg_x",
+            "package_name": "x",
+            "cases": [
+                {"case_id": "003-001", "case_text": "t", "rubric_version": 1,
+                 "rubric": ["i1", "i2", "i3"],
+                 "answers": [{"label": L, "response_text": "a", "images": []}
+                             for L in "ABC"]},
+                {"case_id": "003-002", "case_text": "t2", "rubric_version": 1,
+                 "rubric": ["b1"],
+                 "answers": [{"label": "A", "response_text": "a", "images": []}]},
+            ],
+        }
+        self.package = Package("x.zip", manifest)
+        self.scores = ScoresStore("scores_x.json", manifest)
+        # A: covered everything except the (to be removed) item 2.
+        self.scores.upsert("003-001", "A", [True, False, True], None, None,
+                           rubric_version=1)
+        # B: covered everything; scored 2.
+        self.scores.upsert("003-001", "B", [True, True, True], False, False,
+                           rubric_version=1)
+        # C: missed item 1 (kept) - still a 0 whatever happens to item 2.
+        self.scores.upsert("003-001", "C", [False, True, True], None, None,
+                           rubric_version=1)
+        self.scores.upsert("003-002", "A", [True], False, False, rubric_version=1)
+
+    def tearDown(self):
+        os.chdir(self.old_cwd)
+        self.tmp.cleanup()
+
+    def removal_update(self):
+        return {"003-001": {
+            "case_id": "003-001", "rubric": ["i1", "i3"], "rubric_version": 2,
+            "from_version": 1,
+            "ops": {"removed": [1], "reworded": [], "added": []},
+        }}
+
+    def test_grade_survives_removal_rule(self):
+        self.assertFalse(grade_survives_removal(
+            {"rubric_results": [True, False, True]}, [1]
+        ))  # missed ONLY the removed item: outcome now unknown
+        self.assertTrue(grade_survives_removal(
+            {"rubric_results": [True, True, True]}, [1]
+        ))  # covered it: nothing changes
+        self.assertTrue(grade_survives_removal(
+            {"rubric_results": [False, False, True]}, [1]
+        ))  # also missed a KEPT item: still a 0 either way
+
+    def test_removed_item_requeues_only_the_affected_answer(self):
+        messages = apply_rubric_updates(self.package, self.scores, self.removal_update())
+        self.assertTrue(any("003-001" in m for m in messages))
+        # The package copy of the rubric is updated.
+        case = self.package.cases[0]
+        self.assertEqual(case["rubric"], ["i1", "i3"])
+        self.assertEqual(case["rubric_version"], 2)
+        # A is re-queued (kept for the audit trail under superseded).
+        self.assertIsNone(self.scores.get("003-001", "A"))
+        self.assertEqual(len(self.scores.superseded), 1)
+        self.assertTrue(self.scores.superseded[0]["superseded"])
+        # B and C are carried over: shorter results, same outcome, new version.
+        b = self.scores.get("003-001", "B")
+        self.assertEqual(b["rubric_results"], [True, True])
+        self.assertEqual(b["score"], 2)
+        self.assertEqual(b["rubric_version"], 2)
+        c = self.scores.get("003-001", "C")
+        self.assertEqual(c["rubric_results"], [False, True])
+        self.assertEqual(c["score"], 0)
+        # The untouched case is untouched.
+        self.assertIsNotNone(self.scores.get("003-002", "A"))
+
+    def test_added_or_reworded_item_requeues_every_answer_on_the_case(self):
+        updates = {"003-001": {
+            "case_id": "003-001", "rubric": ["i1", "i2", "i3", "i4 new"],
+            "rubric_version": 2, "from_version": 1,
+            "ops": {"removed": [], "reworded": [], "added": [3]},
+        }}
+        apply_rubric_updates(self.package, self.scores, updates)
+        for label in "ABC":
+            self.assertIsNone(self.scores.get("003-001", label))
+        self.assertEqual(len(self.scores.superseded), 3)
+        self.assertIsNotNone(self.scores.get("003-002", "A"))
+
+    def test_update_is_idempotent(self):
+        apply_rubric_updates(self.package, self.scores, self.removal_update())
+        before = json.dumps(sorted(self.scores.scores.keys()))
+        messages = apply_rubric_updates(self.package, self.scores, self.removal_update())
+        self.assertEqual(messages, [])  # second application changes nothing
+        self.assertEqual(before, json.dumps(sorted(self.scores.scores.keys())))
+        self.assertEqual(len(self.scores.superseded), 1)
+
+    def test_unknown_ops_fall_back_to_full_requeue(self):
+        updates = {"003-001": {
+            "case_id": "003-001", "rubric": ["i1", "i3"], "rubric_version": 3,
+            "from_version": None, "ops": None,
+        }}
+        apply_rubric_updates(self.package, self.scores, updates)
+        for label in "ABC":
+            self.assertIsNone(self.scores.get("003-001", label))
+
+    def test_flags_and_superseded_round_trip_through_the_file(self):
+        self.scores.add_flag("003-001", 1, "i2", "too strict")
+        apply_rubric_updates(self.package, self.scores, self.removal_update())
+        reloaded = ScoresStore.load_or_create("scores_x.json", self.package.manifest)
+        self.assertEqual(reloaded.rubric_flags[0]["note"], "too strict")
+        self.assertEqual(len(reloaded.superseded), 1)
+        self.assertEqual(reloaded.get("003-001", "B")["rubric_version"], 2)
+
+    def test_update_files_are_found_and_merged(self):
+        with open("rubric_update_20260715.json", "w", encoding="utf-8") as f:
+            json.dump({"kind": "rubric_update", "cases": [
+                {"case_id": "003-001", "rubric": ["i1"], "rubric_version": 2},
+            ]}, f)
+        with open("rubric_update_20260716.json", "w", encoding="utf-8") as f:
+            json.dump({"kind": "rubric_update", "cases": [
+                {"case_id": "003-001", "rubric": ["i1 v3"], "rubric_version": 3},
+            ]}, f)
+        paths = find_rubric_updates()
+        self.assertEqual(len(paths), 2)
+        updates, problems = load_rubric_updates(paths)
+        self.assertEqual(problems, [])
+        self.assertEqual(updates["003-001"]["rubric_version"], 3)  # newest wins
 
 
 if __name__ == "__main__":

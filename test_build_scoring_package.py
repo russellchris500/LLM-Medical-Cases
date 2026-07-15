@@ -15,6 +15,7 @@ from build_scoring_package import (
     blinded_image_name,
     build_package,
     self_identification_warnings,
+    stale_package_warnings,
 )
 
 
@@ -78,6 +79,26 @@ class PackageTests(unittest.TestCase):
             self.answers,
             warn=lambda *_: None,
         )
+
+    def test_rubric_versions_travel_in_package_and_key(self):
+        self.master.edit_rubric("003-001", ["r1 only"], reason="fix")
+        zip_path, key_path = self.build()
+        with zipfile.ZipFile(zip_path) as bundle:
+            manifest = json.loads(bundle.read("package.json"))
+        versions = {c["case_id"]: c["rubric_version"] for c in manifest["cases"]}
+        self.assertEqual(versions, {"003-001": 2, "003-002": 1})
+        with open(key_path, encoding="utf-8") as f:
+            key = json.load(f)
+        self.assertEqual(key["rubric_versions"], {"003-001": 2, "003-002": 1})
+
+    def test_stale_packages_are_reported_after_a_rubric_edit(self):
+        self.build(name="early")
+        self.assertEqual(stale_package_warnings(self.master), [])
+        self.master.edit_rubric("003-001", ["r1 tightened", "r2"], reason="fix")
+        warnings = stale_package_warnings(self.master)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("early", warnings[0])
+        self.assertIn("003-001 (v1 -> v2)", warnings[0])
 
     def test_zip_and_key_are_consistent(self):
         zip_path, key_path = self.build()

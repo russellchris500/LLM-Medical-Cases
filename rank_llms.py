@@ -161,8 +161,11 @@ def find_key_files(extra_folders=()):
 
 
 def load_keys(paths):
-    """package_id -> {case_id: {label: {model_id, model_reported}}}"""
+    """Returns (keys, rubric_versions):
+    keys: package_id -> {case_id: {label: {model_id, model_reported}}}
+    rubric_versions: package_id -> {case_id: version at packaging time}"""
     keys = {}
+    rubric_versions = {}
     for path in paths:
         try:
             data = load_json_file(path)
@@ -172,7 +175,9 @@ def load_keys(paths):
         package_id = data.get("package_id")
         if package_id and isinstance(data.get("key"), dict):
             keys[package_id] = data["key"]
-    return keys
+            if isinstance(data.get("rubric_versions"), dict):
+                rubric_versions[package_id] = data["rubric_versions"]
+    return keys, rubric_versions
 
 
 def load_scores(paths):
@@ -198,14 +203,43 @@ def load_scores(paths):
     return loaded
 
 
-def build_matches(scores_files, keys):
+def reference_rubric_versions(scores_files, rubric_versions, current_versions):
+    """The rubric version every grade of a case must match.
+
+    The master database's current version wins when known. Otherwise the
+    highest version seen anywhere (key file or any grade) is the
+    reference - the key alone can be stale after a mid-study rubric fix,
+    and re-graded answers carry the newer version.
+    """
+    reference = {}  # (package_id, case_id) -> version
+    for scores_file in scores_files:
+        package_id = scores_file["package_id"]
+        packaged = (rubric_versions or {}).get(package_id) or {}
+        for record in scores_file["records"]:
+            case_id = record.get("case_id")
+            spot = (package_id, case_id)
+            candidates = [reference.get(spot, 1), record.get("rubric_version", 1)]
+            if case_id in packaged:
+                candidates.append(packaged[case_id])
+            if (current_versions or {}).get(case_id):
+                candidates = [current_versions[case_id]]
+            reference[spot] = max(candidates)
+    return reference
+
+
+def build_matches(scores_files, keys, rubric_versions=None, current_versions=None):
     """Join grades to models. Returns (matches, warnings).
 
     Each graded answer becomes one match:
     {model_id, case_id, result, score, scorer, package_id}.
+
+    Grades made under an outdated rubric version are refused: every model
+    on a case must have been judged by the SAME rubric or the ratings are
+    not comparable.
     """
     matches = []
     warnings = []
+    reference = reference_rubric_versions(scores_files, rubric_versions, current_versions)
     for scores_file in scores_files:
         key = keys.get(scores_file["package_id"])
         if key is None:
@@ -234,6 +268,18 @@ def build_matches(scores_files, keys):
                 warnings.append(
                     "{}: case {} answer {} has no valid 0/1/2 score (left out).".format(
                         scores_file["path"], case_id, label
+                    )
+                )
+                continue
+            expected_version = reference.get((scores_file["package_id"], case_id), 1)
+            grade_version = record.get("rubric_version", 1)
+            if grade_version != expected_version:
+                warnings.append(
+                    "{}: case {} answer {} was graded under rubric version {} "
+                    "but the study is on version {} - it must be re-graded "
+                    "before it can be ranked (left out).".format(
+                        scores_file["path"], case_id, label,
+                        grade_version, expected_version,
                     )
                 )
                 continue
@@ -402,7 +448,21 @@ def main():
     scores_files = load_scores(
         [os.path.join(scores_folder, name) for name in find_scores_files(scores_folder)]
     )
-    keys = load_keys(find_key_files(extra_folders=[scores_folder]))
+    keys, packaged_versions = load_keys(find_key_files(extra_folders=[scores_folder]))
+    # The master database, when present, is the authority on the current
+    # rubric version of every case.
+    current_versions = {}
+    try:
+        from merge_cases import MASTER_FILENAME, MasterStore
+
+        if os.path.exists(MASTER_FILENAME):
+            master = MasterStore.load(MASTER_FILENAME)
+            current_versions = {
+                case_id: case.get("rubric_version", 1)
+                for case_id, case in master.cases.items()
+            }
+    except Exception:
+        current_versions = {}
     if not scores_files:
         gui_common.show_error(
             "No scores files",
@@ -420,7 +480,9 @@ def main():
         root.destroy()
         return 1
 
-    matches, warnings = build_matches(scores_files, keys)
+    matches, warnings = build_matches(
+        scores_files, keys, packaged_versions, current_versions
+    )
     if not matches:
         gui_common.show_error(
             "Nothing to rank",

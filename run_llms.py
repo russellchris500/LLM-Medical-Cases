@@ -38,6 +38,9 @@ from eval_common import (
     case_hash,
     markdown_to_html,
     model_slug,
+    rubric_hash,
+    rubric_version,
+    text_hash,
     parse_selection,
     sort_case_ids,
     split_case_id,
@@ -147,6 +150,11 @@ def new_record(case, model, prompt_sent, deep_thinking=True):
         "status": "failed",
         "error": None,
         "case_sha256": case_hash(case),
+        # Split fingerprints: only a case-TEXT change means the models must
+        # be re-asked; a rubric change only affects grading.
+        "case_text_sha256": text_hash(case),
+        "rubric_sha256": rubric_hash(case),
+        "rubric_version": rubric_version(case),
         "case_updated_at": case.get("updated_at"),
         "started_at": now_iso(),
         "finished_at": None,
@@ -155,6 +163,16 @@ def new_record(case, model, prompt_sent, deep_thinking=True):
 
 
 # ---------- worklist ----------
+
+
+def answer_needs_reask(record, case):
+    """True when the case TEXT changed since this answer was collected.
+    Rubric-only edits never re-ask the models - the prompt they see is the
+    case text alone. Old records (before the fingerprint split) only have
+    the combined hash, so they fall back to comparing that."""
+    if record.get("case_text_sha256"):
+        return record["case_text_sha256"] != text_hash(case)
+    return record.get("case_sha256") != case_hash(case)
 
 
 def build_worklist(master, answers, case_ids, models):
@@ -169,7 +187,7 @@ def build_worklist(master, answers, case_ids, models):
             if existing is None:
                 todo[model["variant_id"]].append(case_id)
             elif existing.get("status") in OK_STATUSES:
-                if existing.get("case_sha256") != case_hash(master.cases[case_id]):
+                if answer_needs_reask(existing, master.cases[case_id]):
                     changed_pairs.append((case_id, model))
                 else:
                     skipped += 1

@@ -23,9 +23,10 @@ import json
 import os
 import re
 import tempfile
+import time
 from datetime import datetime
 
-from case_editor import FORMAT_VERSION, CaseStore, CaseStoreError
+from case_editor import FORMAT_VERSION, CaseStore, CaseStoreError, now_iso
 
 MASTER_FILENAME = "master_cases.json"
 
@@ -148,6 +149,18 @@ class MasterStore:
                     new = parse_timestamp(incoming.get("updated_at"))
                     take_incoming = old is not None and new is not None and new > old
                 if take_incoming:
+                    # Rubric versions must only ever go up in the master,
+                    # even if the provider's file never saw the PI's bumps.
+                    if incoming["rubric"] != existing["rubric"]:
+                        incoming["rubric_version"] = max(
+                            int(incoming.get("rubric_version", 1)),
+                            int(existing.get("rubric_version", 1)) + 1,
+                        )
+                    else:
+                        incoming["rubric_version"] = max(
+                            int(incoming.get("rubric_version", 1)),
+                            int(existing.get("rubric_version", 1)),
+                        )
                     self.cases[incoming["case_id"]] = incoming
                     report["updated"].append(incoming["case_id"])
                 else:
@@ -163,6 +176,96 @@ class MasterStore:
             else:
                 report["missing_kept"].append(case_id)
         return report
+
+    def edit_rubric(self, case_id, new_rubric, ops=None, reason=""):
+        """Apply a PI rubric fix: bump rubric_version and keep the full
+        before/after in rubric_history so the change is auditable and can
+        be sent to scorers as a rubric-update file.
+
+        ops describes what happened to each OLD item index, so scorers can
+        invalidate only the affected grades:
+          {"removed": [old indexes], "reworded": [old indexes],
+           "added": [new indexes]}
+        Pass ops=None when the mapping is unknown; scorers then re-grade
+        every answer on the case (the safe fallback).
+        """
+        case = self.cases.get(case_id)
+        if case is None:
+            raise CaseStoreError("No case {} in the master database.".format(case_id))
+        cleaned = []
+        for item in new_rubric:
+            if not isinstance(item, str) or not item.strip():
+                raise CaseStoreError("Rubric items must be non-empty text.")
+            cleaned.append(item.strip())
+        if not cleaned:
+            raise CaseStoreError("The rubric must keep at least one item.")
+        if cleaned == case["rubric"]:
+            return case  # nothing changed
+        old_version = case.get("rubric_version", 1)
+        old_version = old_version if isinstance(old_version, int) and old_version >= 1 else 1
+        entry = {
+            "from_version": old_version,
+            "to_version": old_version + 1,
+            "old_rubric": list(case["rubric"]),
+            "new_rubric": list(cleaned),
+            "ops": ops,
+            "reason": reason,
+            "edited_at": now_iso(),
+        }
+        case["rubric"] = cleaned
+        case["rubric_version"] = old_version + 1
+        case.setdefault("rubric_history", []).append(entry)
+        case["updated_at"] = now_iso()
+        return case
+
+
+def rubric_update_payload(master, case_ids):
+    """The small emailable rubric-update file: for each edited case, the
+    current rubric, its version, and the latest change's item mapping.
+    Contains no answers and nothing that could unblind a scorer."""
+    cases = []
+    for case_id in sorted(case_ids):
+        case = master.cases[case_id]
+        history = case.get("rubric_history") or []
+        latest = history[-1] if history else None
+        cases.append({
+            "case_id": case_id,
+            "rubric": list(case["rubric"]),
+            "rubric_version": case.get("rubric_version", 1),
+            "from_version": latest["from_version"] if latest else None,
+            "ops": latest["ops"] if latest else None,
+            "reason": (latest.get("reason") or "") if latest else "",
+        })
+    return {
+        "format_version": FORMAT_VERSION,
+        "kind": "rubric_update",
+        "created_at": now_iso(),
+        "cases": cases,
+    }
+
+
+def read_rubric_flags(paths):
+    """Collect rubric_flags entries from scorer scores_*.json files.
+    Returns (flags, problems); each flag gains the scorer name and file."""
+    flags = []
+    problems = []
+    for path in paths:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError) as error:
+            problems.append("{}: {}".format(os.path.basename(path), error))
+            continue
+        if not isinstance(data, dict):
+            problems.append("{}: not a scores file".format(os.path.basename(path)))
+            continue
+        for flag in data.get("rubric_flags", []):
+            if isinstance(flag, dict) and isinstance(flag.get("case_id"), str):
+                enriched = dict(flag)
+                enriched["scorer"] = data.get("scorer", "")
+                enriched["file"] = os.path.basename(path)
+                flags.append(enriched)
+    return flags, problems
 
 
 # ---------- window interface ----------
@@ -212,6 +315,21 @@ class MergeApp:
         tk.Button(left, text="View the master database", command=self.view_master).pack(
             fill="x", pady=(8, 0)
         )
+        tk.Label(left, text="Rubric fixes:", anchor="w").pack(fill="x", pady=(10, 0))
+        tk.Button(
+            left, text="Review rubric flags from scorers...",
+            command=self.review_rubric_flags,
+        ).pack(fill="x", pady=(2, 0))
+        tk.Button(
+            left, text="Edit a case's rubric...", command=self.edit_rubric_prompt
+        ).pack(fill="x", pady=(2, 0))
+        self.update_button = tk.Button(
+            left, text="Save a rubric update file (0 changes)",
+            command=self.save_rubric_update, state="disabled",
+        )
+        self.update_button.pack(fill="x", pady=(2, 0))
+        # Cases edited this session, for the rubric-update file.
+        self.edited_case_ids = set()
 
         right = tk.Frame(body)
         right.pack(side="left", fill="both", expand=True, padx=(8, 0))
@@ -360,6 +478,214 @@ class MergeApp:
         self.log.log("")
         self.update_summary()
 
+    # ---- rubric fixes ----
+
+    def review_rubric_flags(self):
+        import gui_common
+        from tkinter import filedialog
+
+        paths = filedialog.askopenfilenames(
+            parent=self.root,
+            title="Choose the scores files the scorers emailed back (scores_*.json)",
+            filetypes=[("Scores files", "*.json"), ("All files", "*.*")],
+        )
+        if not paths:
+            return
+        flags, problems = read_rubric_flags(paths)
+        for problem in problems:
+            self.log.log("Could not read {}".format(problem))
+        if not flags:
+            self.gui.messagebox.showinfo(
+                "No flags",
+                "No rubric flags were found in the chosen files - the scorers "
+                "did not flag any rubric items.",
+                parent=self.root,
+            )
+            return
+        window = self.gui.tk.Toplevel(self.root)
+        window.title("Rubric items flagged by scorers")
+        window.geometry("900x420")
+        tree = gui_common.make_table(
+            window,
+            [("case", "Case"), ("item", "Item #"), ("text", "Rubric item"),
+             ("note", "Scorer's note"), ("scorer", "Scorer")],
+            widths={"case": 80, "item": 60, "text": 330, "note": 260, "scorer": 90},
+        )
+        for i, flag in enumerate(flags):
+            tree.insert("", "end", iid=str(i), values=(
+                flag.get("case_id", ""),
+                (flag.get("item_index", 0) or 0) + 1,
+                flag.get("item_text", ""),
+                flag.get("note", ""),
+                flag.get("scorer", ""),
+            ))
+        tree.master.pack(fill="both", expand=True, padx=8, pady=(8, 0))
+
+        def edit_flagged():
+            selection = tree.selection()
+            if not selection:
+                self.gui.messagebox.showinfo(
+                    "Nothing selected", "Click a flag first.", parent=window
+                )
+                return
+            case_id = flags[int(selection[0])].get("case_id", "")
+            self.edit_rubric_dialog(case_id)
+
+        row = self.gui.tk.Frame(window)
+        row.pack(fill="x", padx=8, pady=8)
+        self.gui.tk.Button(
+            row, text="Edit this case's rubric...", command=edit_flagged
+        ).pack(side="left")
+
+    def edit_rubric_prompt(self):
+        from tkinter import simpledialog
+
+        case_id = simpledialog.askstring(
+            "Which case?",
+            "Case ID whose rubric needs fixing (e.g. 003-007):",
+            parent=self.root,
+        )
+        if case_id:
+            self.edit_rubric_dialog(case_id.strip())
+
+    def edit_rubric_dialog(self, case_id):
+        tk = self.gui.tk
+        case = self.master.cases.get(case_id)
+        if case is None:
+            self.gui.messagebox.showerror(
+                "Unknown case", "There is no case {} in the master database.".format(case_id),
+                parent=self.root,
+            )
+            return
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Edit the rubric of case {} (version {})".format(
+            case_id, case.get("rubric_version", 1)
+        ))
+        dialog.geometry("760x560")
+        tk.Label(
+            dialog,
+            text="Case text:\n{}".format(preview(case, 180)),
+            anchor="w", justify="left", wraplength=720,
+        ).pack(fill="x", padx=10, pady=(10, 4))
+        tk.Label(
+            dialog,
+            text="Edit an item's wording in its box; tick Remove to drop it. "
+            "Add brand-new items at the bottom.",
+            anchor="w", justify="left", wraplength=720,
+        ).pack(fill="x", padx=10)
+
+        holder = tk.Frame(dialog)
+        holder.pack(fill="x", padx=10, pady=6)
+        item_vars = []
+        for index, item in enumerate(case["rubric"]):
+            row = tk.Frame(holder)
+            row.pack(fill="x", pady=2)
+            tk.Label(row, text="{}.".format(index + 1), width=3, anchor="e").pack(side="left")
+            text_var = tk.StringVar(value=item)
+            tk.Entry(row, textvariable=text_var).pack(side="left", fill="x", expand=True)
+            remove_var = tk.BooleanVar(value=False)
+            tk.Checkbutton(row, text="Remove", variable=remove_var).pack(side="left", padx=4)
+            item_vars.append((item, text_var, remove_var))
+
+        tk.Label(dialog, text="New items to ADD (one per line):", anchor="w").pack(
+            fill="x", padx=10
+        )
+        added_box = self.gui.tk.Text(dialog, height=4)
+        added_box.pack(fill="x", padx=10, pady=(2, 6))
+        reason_row = tk.Frame(dialog)
+        reason_row.pack(fill="x", padx=10)
+        tk.Label(reason_row, text="Why (kept in the audit trail):").pack(side="left")
+        reason_var = tk.StringVar()
+        tk.Entry(reason_row, textvariable=reason_var).pack(side="left", fill="x", expand=True)
+
+        def apply_edit():
+            new_rubric = []
+            ops = {"removed": [], "reworded": [], "added": []}
+            for old_index, (original, text_var, remove_var) in enumerate(item_vars):
+                if remove_var.get():
+                    ops["removed"].append(old_index)
+                    continue
+                text = text_var.get().strip()
+                if text != original:
+                    ops["reworded"].append(old_index)
+                new_rubric.append(text)
+            added = [line.strip() for line in added_box.get("1.0", "end").splitlines()
+                     if line.strip()]
+            for offset in range(len(added)):
+                ops["added"].append(len(new_rubric) + offset)
+            new_rubric.extend(added)
+            if new_rubric == case["rubric"]:
+                self.gui.messagebox.showinfo(
+                    "No change", "The rubric is unchanged.", parent=dialog
+                )
+                return
+            try:
+                edited = self.master.edit_rubric(
+                    case_id, new_rubric, ops=ops, reason=reason_var.get().strip()
+                )
+                self.master.save()
+            except (CaseStoreError, OSError) as error:
+                self.gui.messagebox.showerror("Cannot save", str(error), parent=dialog)
+                return
+            if case_id in self.edited_case_ids:
+                # Two edits in one session: the update file can no longer
+                # describe a single step, so scorers re-grade the whole case.
+                history = edited.get("rubric_history") or []
+                if history:
+                    history[-1]["ops"] = None
+            self.edited_case_ids.add(case_id)
+            self.update_button.configure(
+                state="normal",
+                text="Save a rubric update file ({} change{})".format(
+                    len(self.edited_case_ids),
+                    "" if len(self.edited_case_ids) == 1 else "s",
+                ),
+            )
+            self.log.log(
+                "Rubric of case {} is now version {}. Remember to TELL PROVIDER {} "
+                "so their own file gets the same fix.".format(
+                    case_id, edited.get("rubric_version"), case.get("provider_number")
+                )
+            )
+            self.log.log(
+                "When done editing, click 'Save a rubric update file' and email "
+                "it to every scorer who has this case."
+            )
+            self.update_summary()
+            dialog.destroy()
+
+        buttons = tk.Frame(dialog)
+        buttons.pack(fill="x", padx=10, pady=(4, 10))
+        tk.Button(buttons, text="Save the new rubric", command=apply_edit).pack(side="left")
+        tk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="left", padx=6)
+
+    def save_rubric_update(self):
+        from tkinter import filedialog
+
+        if not self.edited_case_ids:
+            return
+        payload = rubric_update_payload(self.master, self.edited_case_ids)
+        default_name = "rubric_update_{}.json".format(time.strftime("%Y%m%d_%H%M%S"))
+        path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Save the rubric update file (email it to your scorers)",
+            initialfile=default_name,
+            defaultextension=".json",
+            filetypes=[("Rubric update files", "*.json")],
+        )
+        if not path:
+            return
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        self.log.log(
+            "Saved {} covering {}: email it to every scorer together with "
+            "score_answers.py's instructions - their program applies it and "
+            "re-queues only the answers the change affects.".format(
+                os.path.basename(path), ", ".join(sorted(self.edited_case_ids))
+            )
+        )
+
     def view_master(self):
         import gui_common
 
@@ -368,14 +694,18 @@ class MergeApp:
         window.geometry("860x480")
         tree = gui_common.make_table(
             window,
-            [("case", "Case"), ("items", "Rubric items"), ("text", "Case text")],
-            widths={"case": 90, "items": 90, "text": 620},
+            [("case", "Case"), ("items", "Rubric items"), ("version", "Rubric v"),
+             ("text", "Case text")],
+            widths={"case": 90, "items": 90, "version": 70, "text": 550},
         )
         ordered = sorted(
             self.master.cases.values(), key=lambda c: (c["provider_number"], c["case_number"])
         )
         for case in ordered:
-            tree.insert("", "end", values=(case["case_id"], len(case["rubric"]), preview(case, 100)))
+            tree.insert("", "end", values=(
+                case["case_id"], len(case["rubric"]),
+                case.get("rubric_version", 1), preview(case, 100),
+            ))
         tree.master.pack(fill="both", expand=True, padx=8, pady=8)
 
 

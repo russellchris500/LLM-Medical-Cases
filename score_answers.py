@@ -231,6 +231,11 @@ class ScoresStore:
         self.scorer = ""
         self.created_at = now_iso()
         self.scores = {}  # (case_id, label) -> record
+        # Rubric items the scorer flagged as too hard/wrong, for the PI.
+        self.rubric_flags = []
+        # Grades invalidated by a PI rubric change - kept for the audit
+        # trail, no longer counted anywhere.
+        self.superseded = []
 
     @classmethod
     def load_or_create(cls, path, package_manifest):
@@ -251,6 +256,12 @@ class ScoresStore:
             )
         store.scorer = data.get("scorer", "")
         store.created_at = data.get("created_at", store.created_at)
+        store.rubric_flags = [
+            f for f in data.get("rubric_flags", []) if isinstance(f, dict)
+        ]
+        store.superseded = [
+            r for r in data.get("superseded", []) if isinstance(r, dict)
+        ]
         for record in data.get("scores", []):
             if not (
                 isinstance(record, dict)
@@ -283,13 +294,16 @@ class ScoresStore:
                 "created_at": self.created_at,
                 "updated_at": now_iso(),
                 "scores": ordered,
+                "rubric_flags": self.rubric_flags,
+                "superseded": self.superseded,
             },
         )
 
     def get(self, case_id, label):
         return self.scores.get((case_id, label))
 
-    def upsert(self, case_id, label, rubric_results, unnecessary_risk, poor_approach, comment=""):
+    def upsert(self, case_id, label, rubric_results, unnecessary_risk, poor_approach,
+               comment="", rubric_version=1):
         self.scores[(case_id, label)] = {
             "case_id": case_id,
             "label": label,
@@ -298,8 +312,20 @@ class ScoresStore:
             "poor_approach": poor_approach,
             "score": compute_score(rubric_results, unnecessary_risk, poor_approach),
             "comment": comment,
+            # Which rubric this grade was made against.
+            "rubric_version": rubric_version,
             "scored_at": now_iso(),
         }
+        self.save()
+
+    def add_flag(self, case_id, item_index, item_text, note):
+        self.rubric_flags.append({
+            "case_id": case_id,
+            "item_index": item_index,
+            "item_text": item_text,
+            "note": note,
+            "flagged_at": now_iso(),
+        })
         self.save()
 
 
@@ -319,6 +345,165 @@ def compute_score(rubric_results, unnecessary_risk, poor_approach):
     if poor_approach:
         return 1
     return 2
+
+
+# ---------- rubric updates from the PI ----------
+#
+# When the PI fixes a rubric mid-study, they email a small
+# rubric_update_*.json file. Saved next to the zip, it is applied at every
+# start: the package's rubric is replaced, and exactly the grades the
+# change invalidates are set aside (kept under "superseded" in the scores
+# file) and re-queued for grading. Grades are never silently altered
+# except the lossless case: an item REMOVED that the answer had covered.
+
+
+def find_rubric_updates(folder="."):
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return []
+    return sorted(
+        os.path.join(folder, n) for n in names
+        if re.fullmatch(r"rubric_update_.*\.json", n)
+    )
+
+
+def load_rubric_updates(paths):
+    """Merge update files into {case_id: entry}, newest version winning."""
+    updates = {}
+    problems = []
+    for path in paths:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError) as error:
+            problems.append("{}: {}".format(os.path.basename(path), error))
+            continue
+        if not isinstance(data, dict) or data.get("kind") != "rubric_update":
+            problems.append("{}: not a rubric update file".format(os.path.basename(path)))
+            continue
+        for entry in data.get("cases", []):
+            if not (
+                isinstance(entry, dict)
+                and isinstance(entry.get("case_id"), str)
+                and isinstance(entry.get("rubric"), list)
+                and isinstance(entry.get("rubric_version"), int)
+            ):
+                continue
+            current = updates.get(entry["case_id"])
+            if current is None or entry["rubric_version"] > current["rubric_version"]:
+                updates[entry["case_id"]] = entry
+    return updates, problems
+
+
+def grade_survives_removal(record, removed_indexes):
+    """A removed rubric item invalidates a grade only when the answer had
+    covered everything EXCEPT removed item(s): its score would now depend
+    on the risk/approach questions that were never asked. Every other
+    grade can be carried over losslessly."""
+    results = record.get("rubric_results", [])
+    missed_removed = any(
+        index < len(results) and results[index] is False for index in removed_indexes
+    )
+    covered_rest = all(
+        result for index, result in enumerate(results) if index not in removed_indexes
+    )
+    return not (missed_removed and covered_rest)
+
+
+def carry_over_removal(record, removed_indexes, new_version):
+    """Rewrite a surviving grade for the shorter rubric."""
+    results = record.get("rubric_results", [])
+    new_results = [
+        result for index, result in enumerate(results) if index not in removed_indexes
+    ]
+    record["rubric_results"] = new_results
+    record["score"] = compute_score(
+        new_results, record.get("unnecessary_risk"), record.get("poor_approach")
+    )
+    record["rubric_version"] = new_version
+    return record
+
+
+def apply_rubric_updates(package, scores, updates):
+    """Apply PI rubric updates to the loaded package and grades.
+
+    Mutates the package's cases (new rubric + version) and the scores
+    store (invalidated grades move to superseded). Returns a list of
+    plain-language messages for the scorer. Idempotent: applying the same
+    updates twice changes nothing the second time.
+    """
+    messages = []
+    changed = False
+    for case in package.cases:
+        entry = updates.get(case["case_id"])
+        if entry is None:
+            continue
+        old_version = case.get("rubric_version", 1)
+        new_version = entry["rubric_version"]
+        if new_version > old_version:
+            case["rubric"] = [str(item) for item in entry["rubric"]]
+            case["rubric_version"] = new_version
+            messages.append(
+                "Case {}: the investigator updated the rubric (now version {})."
+                .format(case["case_id"], new_version)
+            )
+        # Reconcile this case's grades regardless (grades may predate the
+        # update even when the package copy is already current).
+        ops = entry.get("ops")
+        from_version = entry.get("from_version")
+        removed = list((ops or {}).get("removed", []))
+        clean_removal_only = (
+            ops is not None
+            and not (ops.get("added") or ops.get("reworded"))
+        )
+        requeued = 0
+        carried = 0
+        for key in list(scores.scores):
+            record_case_id, _label = key
+            if record_case_id != case["case_id"]:
+                continue
+            record = scores.scores[key]
+            grade_version = record.get("rubric_version", 1)
+            if grade_version >= new_version:
+                continue
+            if (
+                clean_removal_only
+                and grade_version == from_version
+                and grade_survives_removal(record, removed)
+            ):
+                carry_over_removal(record, removed, new_version)
+                carried += 1
+                changed = True
+                continue
+            superseded = dict(record)
+            superseded["superseded"] = True
+            superseded["superseded_reason"] = (
+                "rubric changed to version {}".format(new_version)
+            )
+            scores.superseded.append(superseded)
+            del scores.scores[key]
+            requeued += 1
+            changed = True
+        if requeued or carried:
+            parts = []
+            if requeued:
+                parts.append(
+                    "{} answer{} need{} to be graded again".format(
+                        requeued, "" if requeued == 1 else "s",
+                        "s" if requeued == 1 else "",
+                    )
+                )
+            if carried:
+                parts.append(
+                    "{} grade{} carried over unchanged".format(
+                        carried, "" if carried == 1 else "s"
+                    )
+                )
+            messages.append("Case {}: {}.".format(case["case_id"], " and ".join(parts)))
+    if changed:
+        scores.save()
+    return messages
 
 
 # ---------- finding the files ----------
@@ -658,6 +843,10 @@ if TK_AVAILABLE:
                     tristatevalue="__none__",
                     command=lambda i=i: self.on_item(i, False),
                 ).grid(row=i + 1, column=2, sticky="w")
+                tk.Button(
+                    self.grading_holder, text="Flag...",
+                    command=lambda i=i: self.flag_item(i),
+                ).grid(row=i + 1, column=3, sticky="w", padx=(6, 0))
             base = len(case["rubric"]) + 1
             self.risk_var = tk.StringVar(
                 value="" if self.grader.unnecessary_risk is None
@@ -706,6 +895,31 @@ if TK_AVAILABLE:
             self.poor_no.grid(row=base + 1, column=2, sticky="w")
             self.grading_holder.columnconfigure(0, weight=1)
             self.refresh_enables()
+
+        def flag_item(self, index):
+            """Tell the PI a rubric item seems too difficult or wrong. The
+            flag travels back inside the scores file; only the PI can
+            actually change the rubric (every scorer must grade against
+            the same one)."""
+            case, _answer = self.entries[self.index]
+            item = case["rubric"][index]
+            note = simpledialog.askstring(
+                "Flag rubric item {}".format(index + 1),
+                "Item: {}\n\nWhat seems wrong with it (too difficult, factually "
+                "wrong, ambiguous...)? Your note goes to the investigator with "
+                "your scores file:".format(item),
+                parent=self.root,
+            )
+            if note is None or not note.strip():
+                return
+            self.scores.add_flag(case["case_id"], index, item, note.strip())
+            messagebox.showinfo(
+                "Flagged",
+                "Noted. Keep grading against the CURRENT wording for now - if "
+                "the investigator changes the rubric, the affected answers "
+                "will automatically come back for re-grading.",
+                parent=self.root,
+            )
 
         def on_item(self, index, met):
             self.grader.set_item(index, met)
@@ -788,6 +1002,7 @@ if TK_AVAILABLE:
             self.scores.upsert(
                 case["case_id"], answer["label"], results, risk, poor,
                 self.comment_entry.get().strip(),
+                rubric_version=case.get("rubric_version", 1),
             )
             self.refresh_progress_list()
             for offset in range(1, len(self.entries) + 1):
@@ -907,6 +1122,21 @@ def main():
         messagebox.showerror("Cannot open the package", str(error))
         root.destroy()
         return 1
+    # Rubric fixes from the investigator: any rubric_update_*.json saved
+    # next to the zip is applied now, re-queueing only the grades the
+    # change affects.
+    updates, update_problems = load_rubric_updates(find_rubric_updates())
+    for problem in update_problems:
+        print("Skipping rubric update file - " + problem)
+    if updates:
+        update_messages = apply_rubric_updates(package, scores, updates)
+        if update_messages:
+            messagebox.showinfo(
+                "Rubric update applied",
+                "The investigator changed one or more rubrics:\n\n{}".format(
+                    "\n".join(update_messages)
+                ),
+            )
     if not scores.scorer:
         name = simpledialog.askstring(
             "Your name", "Your name or initials (stored with your grades):", parent=root

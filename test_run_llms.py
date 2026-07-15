@@ -11,7 +11,13 @@ from case_editor import CaseStore
 from merge_cases import MasterStore
 from eval_common import AnswersStore, SettingsStore, model_slug
 from llm_api import ModelAbort
-from run_llms import build_worklist, model_catalog, new_record, run_api_phase
+from run_llms import (
+    answer_needs_reask,
+    build_worklist,
+    model_catalog,
+    new_record,
+    run_api_phase,
+)
 from rank_llms import build_matches, display_map
 
 
@@ -126,6 +132,47 @@ class ModelIdentityTests(unittest.TestCase):
         names = display_map(matches)
         self.assertEqual(names["claude@claude-opus-4-8"], "Anthropic Claude (claude-opus-4-8)")
         self.assertEqual(names["claude@claude-fable-5.0"], "Anthropic Claude (claude-fable-5.0)")
+
+
+class ChangeDetectionTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old_cwd = os.getcwd()
+        os.chdir(self.tmp.name)
+        self.settings = SettingsStore.load_or_create("settings.json")
+        self.settings.data["options"]["enable_test_model"] = True
+        provider = CaseStore(3, "provider_003_cases.json")
+        provider.add_case("Original text.", ["r1", "r2"])
+        self.master = MasterStore("master_cases.json")
+        self.master.merge_provider(provider)
+        self.case = self.master.cases["003-001"]
+        entry = next(
+            m for m in model_catalog(self.settings) if m["model_id"] == "testmodel"
+        )
+        self.record = new_record(self.case, entry, "p")
+
+    def tearDown(self):
+        os.chdir(self.old_cwd)
+        self.tmp.cleanup()
+
+    def test_rubric_only_change_does_not_reask_the_models(self):
+        # The models never see the rubric, so editing it must not offer
+        # to re-run them - only re-grading is affected.
+        self.assertFalse(answer_needs_reask(self.record, self.case))
+        self.case["rubric"] = ["r1 fixed", "r2"]
+        self.assertFalse(answer_needs_reask(self.record, self.case))
+
+    def test_case_text_change_still_reasks(self):
+        self.case["case_text"] = "Reworded vignette."
+        self.assertTrue(answer_needs_reask(self.record, self.case))
+
+    def test_legacy_records_fall_back_to_the_combined_hash(self):
+        legacy = {k: v for k, v in self.record.items() if k != "case_text_sha256"}
+        self.assertFalse(answer_needs_reask(legacy, self.case))
+        self.case["rubric"] = ["r1 fixed", "r2"]
+        # A legacy record cannot tell text from rubric changes, so it
+        # conservatively counts as changed.
+        self.assertTrue(answer_needs_reask(legacy, self.case))
 
 
 class FakeUi:
