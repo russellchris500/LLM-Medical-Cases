@@ -70,11 +70,10 @@
         "Neurosyphyilis high in differential",
         "Differential: Leptomeningeal carcinomatosis",
         "Differnetial: Sarcoidosis",
-        "Order CSF VDRL, cytology. Serum RPR, treponemal testing",
-        "Order CT chest/abdomen/pelvis"
+        "Order CSF VDRL, cytology. Serum RPR, treponemal testing"
       ],
       "created_at": "2026-07-12T21:00:53Z",
-      "updated_at": "2026-07-12T21:00:53Z"
+      "updated_at": "2026-07-15T18:17:46Z"
     },
     {
       "case_id": "001-007",
