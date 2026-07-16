@@ -241,6 +241,47 @@ class TrustLoginTests(unittest.TestCase):
         )
         self.assertTrue(entry.get("last_login_ok"))
 
+    def test_window_closed_during_signin_requests_reopen(self):
+        # The site killed the whole window mid-sign-in: interactive_login
+        # reports 'reopen' so the caller relaunches the browser (the saved
+        # profile usually kept the session).
+        from run_llms import interactive_login
+
+        class Driver:
+            display_name = "Doximity Ask"
+            site_id = "doximity"
+            login_url = home_url = "https://example/"
+
+            def wait_until_ready(self, page):
+                pass
+
+            def autofill_login(self, page, username, password):
+                pass
+
+            def is_logged_in(self, page):
+                return False
+
+        class DeadPage:
+            def goto(self, *args, **kwargs):
+                raise RuntimeError("target closed")
+
+            def is_closed(self):
+                return True
+
+        class DeadContext:
+            @property
+            def pages(self):
+                raise RuntimeError("browser closed")
+
+        class ContinueUi(FakeUi):
+            def ask_choice(self, title, message, options):
+                return "check"
+
+        outcome = interactive_login(
+            Driver(), DeadContext(), DeadPage(), {}, ContinueUi()
+        )
+        self.assertEqual(outcome, "reopen")
+
 
 class ParallelApiPhaseTests(unittest.TestCase):
     def setUp(self):

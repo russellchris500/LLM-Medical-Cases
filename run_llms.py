@@ -320,6 +320,23 @@ def run_api_phase(master, answers, settings, models, todo, ui):
         raise RuntimeError("{} hit an unexpected problem: {}".format(display, error))
 
 
+def watch_browser(context, page, ui, display_name):
+    """Log tab/window lifecycle events, so 'the browser just closed'
+    becomes a diagnosable line in the run log instead of a mystery."""
+    try:
+        page.on("close", lambda _p: ui.log(
+            "  (the {} tab closed)".format(display_name)))
+        page.on("crash", lambda _p: ui.log(
+            "  (the {} tab CRASHED - this is the browser failing, not you)".format(
+                display_name)))
+        context.on("page", lambda _p: ui.log(
+            "  ({} opened a new tab - following it)".format(display_name)))
+        context.on("close", lambda _c: ui.log(
+            "  (the whole {} browser window closed)".format(display_name)))
+    except Exception:
+        pass
+
+
 def interactive_login(driver, context, page, site_settings, ui):
     try:
         page.goto(driver.login_url, wait_until="domcontentloaded")
@@ -361,14 +378,12 @@ def interactive_login(driver, context, page, site_settings, ui):
         # is actually alive before checking.
         page = ensure_open_page(context, page)
         if page is None:
-            ui.tell(
-                "The browser window was closed",
-                "The whole browser window is gone (some sites close it during "
-                "sign-in). Click 'Log in now' for {} again to reopen it.".format(
-                    driver.display_name
-                ),
-            )
-            return False
+            # The whole window is gone (some sites close it mid-sign-in).
+            # The saved profile usually keeps the fresh session, so the
+            # caller reopens a window and checks - the login often turns
+            # out to have succeeded.
+            ui.log("  The whole browser window closed during sign-in - reopening it...")
+            return "reopen"
         try:
             page.goto(driver.home_url, wait_until="domcontentloaded")
         except Exception:
@@ -463,6 +478,7 @@ def run_browser_site(master, answers, settings, model, case_ids, ui):
         try:
             page = context.pages[0] if context.pages else context.new_page()
             driver = make_driver(site_id)
+            watch_browser(context, page, ui, model["display_name"])
             while True:
                 try:
                     driver.start_new_question(page)
@@ -484,14 +500,34 @@ def run_browser_site(master, answers, settings, model, case_ids, ui):
                         ui.log("  Skipping {}.".format(model["display_name"]))
                         return
                     page = ensure_open_page(context, page) or page
-            if not driver.is_logged_in(page):
-                if not interactive_login(
+            reopens = 0
+            while not driver.is_logged_in(page):
+                outcome = interactive_login(
                     driver, context, page, settings.browser_model(site_id), ui
-                ):
-                    ui.log("  Skipping {} (not logged in).".format(model["display_name"]))
-                    return
-                settings.save()
-                page = ensure_open_page(context, page) or page
+                )
+                if outcome == "reopen" and reopens < 3:
+                    # The site closed the window mid-sign-in; the saved
+                    # profile usually kept the session - reopen and the
+                    # is_logged_in re-check often just passes now.
+                    reopens += 1
+                    try:
+                        context.close()
+                    except Exception:
+                        pass
+                    context = open_site_context(playwright, site_id)
+                    page = context.pages[0] if context.pages else context.new_page()
+                    watch_browser(context, page, ui, model["display_name"])
+                    try:
+                        page.goto(driver.home_url, wait_until="domcontentloaded")
+                    except Exception:
+                        pass
+                    continue
+                if outcome is True:
+                    settings.save()
+                    page = ensure_open_page(context, page) or page
+                    break
+                ui.log("  Skipping {} (not logged in).".format(model["display_name"]))
+                return
 
             images_dir = answers.ensure_images_dir()
             for index, case_id in enumerate(case_ids, start=1):
@@ -1444,21 +1480,45 @@ class RunnerApp:
             from playwright.sync_api import sync_playwright
 
             driver = make_driver(site_id)
+            entry = self.settings.browser_model(site_id)
             with sync_playwright() as playwright:
-                context = open_site_context(playwright, site_id)
-                try:
-                    page = context.pages[0] if context.pages else context.new_page()
-                    if interactive_login(
-                        driver, context, page, self.settings.browser_model(site_id), ui
-                    ):
-                        self.settings.save()
-                        ui.log("Logged in to {}. The login is remembered for future "
-                               "runs.".format(driver.display_name))
-                finally:
+                for attempt in range(4):
+                    context = open_site_context(playwright, site_id)
                     try:
-                        context.close()
-                    except Exception:
-                        pass
+                        page = context.pages[0] if context.pages else context.new_page()
+                        watch_browser(context, page, ui, driver.display_name)
+                        if attempt > 0:
+                            # The previous window died mid-sign-in; the
+                            # saved profile often kept the session, so
+                            # check before asking the user to redo it.
+                            try:
+                                page.goto(driver.home_url, wait_until="domcontentloaded")
+                            except Exception:
+                                pass
+                            if driver.is_logged_in(page):
+                                entry["last_login_ok"] = now_iso()
+                                self.settings.save()
+                                ui.log("Logged in to {} - the sign-in survived the "
+                                       "window closing. It is remembered for future "
+                                       "runs.".format(driver.display_name))
+                                return
+                        outcome = interactive_login(driver, context, page, entry, ui)
+                        if outcome == "reopen":
+                            continue
+                        if outcome is True:
+                            self.settings.save()
+                            ui.log("Logged in to {}. The login is remembered for "
+                                   "future runs.".format(driver.display_name))
+                        return
+                    finally:
+                        try:
+                            context.close()
+                        except Exception:
+                            pass
+                ui.log("The {} window keeps being closed mid-sign-in. Try once "
+                       "more; if it keeps happening, run it with the browser "
+                       "window and tell me exactly when it disappears.".format(
+                           driver.display_name))
 
         def done(_result, error):
             if error is not None:
