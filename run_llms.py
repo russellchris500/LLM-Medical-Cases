@@ -449,7 +449,26 @@ def run_browser_site(master, answers, settings, model, case_ids, ui):
         try:
             page = context.pages[0] if context.pages else context.new_page()
             driver = make_driver(site_id)
-            driver.start_new_question(page)
+            while True:
+                try:
+                    driver.start_new_question(page)
+                    break
+                except BrowserStepError as error:
+                    # Keep the window OPEN and ask - closing it instantly
+                    # looks like the program crashed.
+                    save_site_diagnostics(driver, page, ui)
+                    choice = ui.ask_choice(
+                        "Problem opening {}".format(model["display_name"]),
+                        "{}.\n\nThe browser window is still open - you can also "
+                        "steer it to the right page yourself and then retry.".format(
+                            error.detail
+                        ),
+                        [("retry", "Retry"),
+                         ("skip", "Skip {} for now".format(model["display_name"]))],
+                    )
+                    if choice != "retry":
+                        ui.log("  Skipping {}.".format(model["display_name"]))
+                        return
             if not driver.is_logged_in(page):
                 if not interactive_login(driver, page, settings.browser_model(site_id), ui):
                     ui.log("  Skipping {} (not logged in).".format(model["display_name"]))
@@ -577,7 +596,18 @@ def run_everything(master, answers, settings, models, todo, ui):
         for model in browser_models:
             if ui.stop_requested:
                 raise AbandonRun()
-            run_browser_site(master, answers, settings, model, todo[model["variant_id"]], ui)
+            try:
+                run_browser_site(
+                    master, answers, settings, model, todo[model["variant_id"]], ui
+                )
+            except AbandonRun:
+                raise
+            except Exception as error:
+                # One misbehaving site must never take down the rest of
+                # the run; its unanswered cases simply stay on the list.
+                ui.log("  {} hit an unexpected problem and was set aside: {}".format(
+                    model["display_name"], error
+                ))
     except AbandonRun:
         ui.log("Stopped. Everything answered so far is saved; run again to continue.")
     summarize_run(answers, sorted({c for ids in todo.values() for c in ids}), models, ui)
@@ -1407,7 +1437,21 @@ class RunnerApp:
                     except Exception:
                         pass
 
-        self.settings_task.start(work, on_done=lambda r, e: self.refresh_settings_rows())
+        def done(_result, error):
+            if error is not None:
+                self.settings_log.log(
+                    "The login window closed with a problem: {}".format(error)
+                )
+                self.gui.messagebox.showerror(
+                    "Login window problem",
+                    "The browser window closed because of a problem:\n\n{}\n\n"
+                    "Please try again; if it keeps happening, send the message "
+                    "above for help.".format(error),
+                    parent=self.root,
+                )
+            self.refresh_settings_rows()
+
+        self.settings_task.start(work, on_done=done)
 
     def playwright_setup(self):
         if llm_browser.PLAYWRIGHT_AVAILABLE:

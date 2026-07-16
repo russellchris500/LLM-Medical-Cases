@@ -626,14 +626,26 @@ class SiteDriver:
 
     def start_new_question(self, page):
         """Open a fresh conversation so cases never share chat context -
-        the sites must have NO MEMORY of earlier cases."""
-        try:
-            page.goto(self.home_url, wait_until="domcontentloaded")
-        except Exception as e:
+        the sites must have NO MEMORY of earlier cases.
+
+        Sites that redirect the moment they load (doximity.com/ask sends
+        logged-out visitors straight to its sign-in page) make the
+        navigation call itself raise even though the browser lands
+        somewhere perfectly usable - so a navigation error only counts
+        when the page never shows anything usable either."""
+        error = None
+        for _attempt in range(2):
+            try:
+                page.goto(self.home_url, wait_until="domcontentloaded")
+                error = None
+                break
+            except Exception as e:
+                error = e
+        ready = self.wait_until_ready(page)
+        if error is not None and not ready:
             raise BrowserStepError(
-                "navigation", "could not open {} ({})".format(self.home_url, e)
+                "navigation", "could not open {} ({})".format(self.home_url, error)
             )
-        self.wait_until_ready(page)
         # Some sites reopen the previous conversation on their home page;
         # a visible "new chat"-style button is clicked when one exists.
         button = find_first(page, self.selectors.get("new_chat", []))

@@ -410,6 +410,24 @@ class DriverTests(unittest.TestCase):
         self.assertFalse(self.driver.is_logged_in(page))
         self.assertFalse(self.driver.is_logged_in(FakePage()))
 
+    def test_redirecting_site_does_not_count_as_navigation_failure(self):
+        # doximity.com/ask redirects logged-out visitors immediately; the
+        # navigation call raises even though the browser lands on a usable
+        # login page. As long as SOMETHING usable rendered, carry on.
+        class RedirectingPage(FakePage):
+            def goto(self, url, wait_until=None, timeout=None):
+                super().goto(url, wait_until=wait_until)
+                raise RuntimeError("net::ERR_ABORTED")
+
+        page = RedirectingPage({"input[type='password']": [FakeElement()]})
+        self.driver.start_new_question(page)  # login form rendered: no error
+        self.assertFalse(self.driver.is_logged_in(page))
+
+        blank = RedirectingPage({})
+        with self.assertRaises(BrowserStepError) as ctx:
+            self.driver.start_new_question(blank)
+        self.assertEqual(ctx.exception.step, "navigation")
+
     def test_start_new_question_clicks_new_chat_button(self):
         # No memory between cases: after navigating home, a visible
         # "new chat" button is clicked so the site can't resume the
