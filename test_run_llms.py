@@ -178,10 +178,14 @@ class ChangeDetectionTests(unittest.TestCase):
 class FakeUi:
     def __init__(self):
         self.lines = []
+        self.told = []
         self.stop_requested = False
 
     def log(self, message):
         self.lines.append(message)
+
+    def tell(self, title, message):
+        self.told.append((title, message))
 
 
 def api_entry(llm_id, model_name):
@@ -240,6 +244,89 @@ class TrustLoginTests(unittest.TestCase):
             interactive_login(StubbornDriver(), StubContext(page), page, entry, TrustUi())
         )
         self.assertTrue(entry.get("last_login_ok"))
+
+    def test_normal_browser_route_releases_profile_and_requests_reopen(self):
+        # Sites that close automated windows during sign-in: the user
+        # picks 'Sign in with a normal browser'; the automation window
+        # must release the profile first, then the caller reopens.
+        import run_llms
+        from run_llms import interactive_login
+
+        class Driver:
+            display_name = "Doximity Ask"
+            site_id = "doximity"
+            login_url = home_url = "https://example/"
+
+            def wait_until_ready(self, page):
+                pass
+
+            def autofill_login(self, page, username, password):
+                pass
+
+            def is_logged_in(self, page):
+                return False
+
+        class Page:
+            def goto(self, *args, **kwargs):
+                pass
+
+            def is_closed(self):
+                return False
+
+        class Context:
+            def __init__(self, page):
+                self.pages = [page]
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        class NormalUi(FakeUi):
+            def ask_choice(self, title, message, options):
+                assert any(key == "normal" for key, _ in options)
+                return "normal"
+
+        calls = []
+        original = run_llms.plain_browser_login
+        run_llms.plain_browser_login = lambda site_id, driver, ui: (
+            calls.append(site_id) or True
+        )
+        try:
+            page = Page()
+            context = Context(page)
+            outcome = interactive_login(Driver(), context, page, {}, NormalUi())
+        finally:
+            run_llms.plain_browser_login = original
+        self.assertEqual(outcome, "reopen")
+        self.assertTrue(context.closed)  # profile released first
+        self.assertEqual(calls, ["doximity"])
+
+    def test_plain_browser_login_launches_the_users_browser(self):
+        from run_llms import plain_browser_login
+
+        class Driver:
+            display_name = "Doximity Ask"
+            site_id = "doximity"
+            login_url = "https://www.doximity.com/ask/overview"
+
+        launched = []
+        ui = FakeUi()
+        import run_llms
+        original = run_llms.find_normal_browser
+        run_llms.find_normal_browser = lambda: "/fake/chrome"
+        try:
+            ok = plain_browser_login(
+                "doximity", Driver(), ui, launch=lambda cmd: launched.append(cmd)
+            )
+        finally:
+            run_llms.find_normal_browser = original
+        self.assertTrue(ok)
+        self.assertEqual(len(launched), 1)
+        command = launched[0]
+        self.assertEqual(command[0], "/fake/chrome")
+        self.assertIn("https://www.doximity.com/ask/overview", command)
+        self.assertTrue(any("browser_profiles" in part for part in command))
+        self.assertTrue(ui.told)  # the user got the step-by-step message
 
     def test_window_closed_during_signin_requests_reopen(self):
         # The site killed the whole window mid-sign-in: interactive_login

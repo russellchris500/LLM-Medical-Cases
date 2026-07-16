@@ -58,6 +58,7 @@ import llm_browser
 from llm_browser import (
     BROWSER_MODEL_IDS,
     BrowserStepError,
+    PROFILES_DIR,
     SITE_INFO,
     copy_to_clipboard,
     describe_page,
@@ -320,6 +321,78 @@ def run_api_phase(master, answers, settings, models, todo, ui):
         raise RuntimeError("{} hit an unexpected problem: {}".format(display, error))
 
 
+def find_normal_browser():
+    """The user's everyday Chrome or Edge, for sign-ins with no automation
+    attached at all."""
+    import shutil
+
+    candidates = []
+    if os.name == "nt":
+        for env in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
+            base = os.environ.get(env)
+            if base:
+                candidates.append(
+                    os.path.join(base, "Google", "Chrome", "Application", "chrome.exe")
+                )
+                candidates.append(
+                    os.path.join(base, "Microsoft", "Edge", "Application", "msedge.exe")
+                )
+    else:
+        for name in ("google-chrome", "chromium", "chromium-browser", "microsoft-edge"):
+            path = shutil.which(name)
+            if path:
+                candidates.append(path)
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return None
+
+
+def plain_browser_login(site_id, driver, ui, launch=None):
+    """Sign in WITHOUT any automation attached - for sites whose security
+    closes automated windows during sign-in (they cannot tell this window
+    from everyday browsing, because it IS everyday browsing).
+
+    The same saved profile is used, so the session lands where the
+    automation browser will find it afterwards. Returns True when the
+    user finished the manual sign-in step."""
+    exe = find_normal_browser()
+    if exe is None:
+        ui.tell(
+            "No everyday browser found",
+            "Google Chrome or Microsoft Edge is needed for this sign-in "
+            "route, but neither was found on this computer.",
+        )
+        return False
+    profile = os.path.abspath(os.path.join(PROFILES_DIR, site_id))
+    os.makedirs(profile, exist_ok=True)
+    command = [
+        exe,
+        "--user-data-dir=" + profile,
+        "--no-first-run",
+        "--no-default-browser-check",
+        driver.login_url,
+    ]
+    try:
+        (launch or subprocess.Popen)(command)
+    except OSError as error:
+        ui.tell("Could not open the browser", str(error))
+        return False
+    ui.tell(
+        "Log in - in the NORMAL browser window",
+        "{} keeps closing automated windows during sign-in, so a completely "
+        "NORMAL browser window (no automation attached) has been opened on\n"
+        "{}\n\n"
+        "1. Log in there exactly as you usually do.\n"
+        "2. When you are logged in, CLOSE that browser window completely.\n"
+        "3. Then click OK here.\n\n"
+        "Your login is saved and the automated browser will pick it up.".format(
+            driver.display_name, driver.login_url
+        ),
+    )
+    return True
+
+
 def watch_browser(context, page, ui, display_name):
     """Log tab/window lifecycle events, so 'the browser just closed'
     becomes a diagnosable line in the run log instead of a mystery."""
@@ -358,13 +431,30 @@ def interactive_login(driver, context, page, site_settings, ui):
             "need to do this once; the login is remembered afterwards.\n\n"
             "When you can see the normal question page, click Continue.\n"
             "If the program keeps disagreeing even though you ARE logged in,\n"
-            "choose \"Continue anyway\".".format(driver.display_name),
+            "choose \"Continue anyway\".\n\n"
+            "If this window CLOSES BY ITSELF when you try to sign in, choose\n"
+            "\"Sign in with a normal browser\" - some sites close automated\n"
+            "windows, but they cannot touch your everyday browser.".format(
+                driver.display_name
+            ),
             [
                 ("check", "Continue - I am logged in"),
+                ("normal", "Sign in with a normal browser"),
                 ("trust", "Continue anyway - skip the login check"),
                 ("stop", "Stop / skip this site"),
             ],
         )
+        if choice == "normal":
+            try:
+                # Release the saved profile so the normal browser can use it.
+                context.close()
+            except Exception:
+                pass
+            if plain_browser_login(driver.site_id, driver, ui):
+                # The session now lives in the shared profile; have the
+                # caller reopen the automation browser and re-check.
+                return "reopen"
+            return "reopen"  # context is closed either way; reopen fresh
         if choice == "trust":
             # The check is only a convenience; the user's word wins. If the
             # site is truly logged out, submitting the first question will
