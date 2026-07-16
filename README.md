@@ -162,6 +162,13 @@ the same LLM are ranked as separate entries, labeled with both (e.g.
 - Every graded answer is one match between an LLM and a case: a score of
   **2 is a win** for the LLM, **1 is a draw**, and **0 is a loss** (the case
   beat the LLM).
+- **Several scorers on the same answer**: every scorer's grade counts as
+  its own match — agreement strengthens the rating, disagreement averages
+  out inside the fit. Duplicate grades from the *same* scorer (a stray
+  copy, or an outdated scores file next to the final one) are ignored:
+  only that scorer's most recently saved grade counts. The summary line
+  reports the inter-rater agreement (how often multiple scorers gave the
+  same score), and each disagreement is listed.
 - Ratings are not updated game-by-game like chess Elo — that would depend on
   the arbitrary order the matches are processed. Instead all ratings are
   **fitted at once by logistic regression** (maximum likelihood on the Elo

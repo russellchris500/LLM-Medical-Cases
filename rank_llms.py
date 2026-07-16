@@ -25,6 +25,12 @@ How the rating works, in plain language:
 - To keep ratings finite when a model wins or loses everything, every LLM
   and every case is given one imaginary drawn match against an average
   (1500-rated) opponent.
+- When the SAME answer was graded by several scorers, every grade counts
+  as its own match: agreement strengthens the rating, disagreement
+  averages out. Duplicate grades from the SAME scorer (a stray copy or an
+  outdated scores file) are ignored - only their most recently saved
+  grade counts - and the window reports how often multiple scorers
+  agreed (inter-rater agreement).
 
 It is a window-based program - run it (or double-click "Rank LLMs.pyw");
 the ranking appears as soon as the files are read.
@@ -197,10 +203,99 @@ def load_scores(paths):
                 "package_id": data.get("package_id", ""),
                 "package_name": data.get("package_name", ""),
                 "scorer": data.get("scorer", ""),
+                "updated_at": data.get("updated_at", ""),
                 "records": data["scores"],
             }
         )
     return loaded
+
+
+def dedupe_scores(scores_files):
+    """Within ONE scorer and ONE package, each answer counts once: the
+    most recently saved grade wins. This protects the ranking from a
+    scorer's earlier scores file sitting next to their final one (or a
+    stray copy of the same file) - identical evidence must not count
+    twice, and superseded grades must not count at all. Grades from
+    DIFFERENT scorers are deliberately all kept: more graders on the
+    same answer is more evidence, and disagreement averages out inside
+    the Elo fit.
+
+    Returns (deduped_scores_files, notes)."""
+    best = {}  # (package, scorer, case, label) -> (stamp, file_idx, record)
+    dropped = 0
+    for file_index, scores_file in enumerate(scores_files):
+        for record in scores_file["records"]:
+            key = (
+                scores_file.get("package_id", ""),
+                (scores_file.get("scorer") or "").strip().lower(),
+                record.get("case_id"),
+                record.get("label"),
+            )
+            stamp = (
+                record.get("scored_at") or "",
+                scores_file.get("updated_at") or "",
+            )
+            current = best.get(key)
+            if current is None:
+                best[key] = (stamp, file_index, record)
+            elif stamp > current[0]:
+                best[key] = (stamp, file_index, record)
+                dropped += 1
+            else:
+                dropped += 1
+    kept_by_file = {}
+    for stamp, file_index, record in best.values():
+        kept_by_file.setdefault(file_index, []).append(record)
+    deduped = []
+    for file_index, scores_file in enumerate(scores_files):
+        copy = dict(scores_file)
+        copy["records"] = kept_by_file.get(file_index, [])
+        deduped.append(copy)
+    notes = []
+    if dropped:
+        notes.append(
+            "{} duplicate grade{} (same scorer, same answer) ignored - only "
+            "the most recently saved grade counts. Grades from different "
+            "scorers are all kept.".format(dropped, "" if dropped == 1 else "s")
+        )
+    return deduped, notes
+
+
+def multi_scorer_summary(matches, names=None):
+    """Plain-language inter-rater lines: how many answers were graded by
+    more than one scorer, and how often the scorers agreed exactly."""
+    names = names or {}
+    groups = {}
+    for match in matches:
+        groups.setdefault((match["case_id"], match["model_id"]), []).append(match)
+    multi = {pair: group for pair, group in groups.items() if len(group) > 1}
+    if not multi:
+        return []
+    agreed = sum(
+        1 for group in multi.values() if len({m["score"] for m in group}) == 1
+    )
+    lines = [
+        "{} answer{} graded by more than one scorer; every scorer gave the "
+        "same score on {} of {} ({:.0f}%).".format(
+            len(multi), " was" if len(multi) == 1 else "s were",
+            agreed, len(multi), 100.0 * agreed / len(multi),
+        )
+    ]
+    disagreements = sorted(
+        (pair, group) for pair, group in multi.items()
+        if len({m["score"] for m in group}) > 1
+    )
+    for (case_id, model_id), group in disagreements[:8]:
+        parts = ", ".join(
+            "{} by {}".format(m["score"], m["scorer"] or "?")
+            for m in sorted(group, key=lambda m: m["scorer"] or "")
+        )
+        lines.append("  Disagreement on case {} x {}: {}".format(
+            case_id, names.get(model_id, model_id), parts
+        ))
+    if len(disagreements) > 8:
+        lines.append("  (...and {} more disagreements)".format(len(disagreements) - 8))
+    return lines
 
 
 def reference_rubric_versions(scores_files, rubric_versions, current_versions):
@@ -480,9 +575,11 @@ def main():
         root.destroy()
         return 1
 
+    scores_files, dedupe_notes = dedupe_scores(scores_files)
     matches, warnings = build_matches(
         scores_files, keys, packaged_versions, current_versions
     )
+    warnings = dedupe_notes + warnings
     if not matches:
         gui_common.show_error(
             "Nothing to rank",
@@ -501,10 +598,14 @@ def main():
         "{} scores file(s), {} graded answers usable: {} LLM(s) across {} case(s). "
         "Ratings fitted to all matches at once (logistic regression, {} passes)."
     ).format(len(scores_files), len(matches), len(llms), len(cases), iterations)
+    agreement_lines = multi_scorer_summary(matches, names)
+    if agreement_lines:
+        summary += "\n" + agreement_lines[0]
 
     tk.Label(root, text=summary, anchor="w", justify="left", wraplength=960).pack(
         fill="x", padx=8, pady=(8, 0)
     )
+    warnings = warnings + agreement_lines[1:]
     if warnings:
         warn_box = gui_common.LogBox(root, height=min(4, len(warnings)))
         warn_box.pack(fill="x", padx=8, pady=(4, 0))

@@ -8,9 +8,11 @@ import unittest
 from rank_llms import (
     ELO_CENTER,
     build_matches,
+    dedupe_scores,
     expected_win,
     export_csv,
     fit_ratings,
+    multi_scorer_summary,
 )
 import rank_llms
 
@@ -118,6 +120,75 @@ class FitRatingsTests(unittest.TestCase):
         llms_few, _, _ = fit_ratings(few)
         llms_many, _, _ = fit_ratings(many)
         self.assertGreater(llms_many["m"] - ELO_CENTER, llms_few["m"] - ELO_CENTER)
+
+
+class DedupeAndAgreementTests(unittest.TestCase):
+    def scores_file(self, path, scorer, records, updated_at=""):
+        return {"path": path, "package_id": "pkg_1", "package_name": "t",
+                "scorer": scorer, "updated_at": updated_at, "records": records}
+
+    def remaining(self, files):
+        return [r for f in files for r in f["records"]]
+
+    def test_same_scorer_newer_grade_wins(self):
+        # A scorer's earlier scores file next to their final one: the
+        # superseded grade must not count.
+        old = {"case_id": "003-001", "label": "A", "score": 0,
+               "scored_at": "2026-07-01T10:00:00Z"}
+        new = {"case_id": "003-001", "label": "A", "score": 2,
+               "scored_at": "2026-07-02T10:00:00Z"}
+        files, notes = dedupe_scores([
+            self.scores_file("scores_old.json", "CR", [old]),
+            self.scores_file("scores_new.json", "CR", [new]),
+        ])
+        kept = self.remaining(files)
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0]["score"], 2)
+        self.assertTrue(notes and "duplicate" in notes[0])
+
+    def test_identical_copy_of_a_file_counts_once(self):
+        record = {"case_id": "003-001", "label": "A", "score": 2,
+                  "scored_at": "2026-07-01T10:00:00Z"}
+        files, _notes = dedupe_scores([
+            self.scores_file("scores_x.json", "CR", [dict(record)]),
+            self.scores_file("scores_x - Copy.json", "CR", [dict(record)]),
+        ])
+        self.assertEqual(len(self.remaining(files)), 1)
+
+    def test_different_scorers_are_all_kept(self):
+        files, notes = dedupe_scores([
+            self.scores_file("scores_a.json", "CR",
+                             [{"case_id": "003-001", "label": "A", "score": 2}]),
+            self.scores_file("scores_b.json", "JS",
+                             [{"case_id": "003-001", "label": "A", "score": 0}]),
+        ])
+        self.assertEqual(len(self.remaining(files)), 2)
+        self.assertEqual(notes, [])
+
+    def test_multi_scorer_summary_reports_agreement_and_disagreement(self):
+        def match(case_id, model_id, score, scorer):
+            return {"case_id": case_id, "model_id": model_id, "score": score,
+                    "result": {0: 0.0, 1: 0.5, 2: 1.0}[score], "scorer": scorer}
+
+        matches = [
+            match("003-001", "claude", 2, "CR"),
+            match("003-001", "claude", 2, "JS"),   # agree
+            match("003-001", "gpt", 2, "CR"),
+            match("003-001", "gpt", 0, "JS"),      # disagree
+            match("003-002", "claude", 1, "CR"),   # single scorer: not counted
+        ]
+        lines = multi_scorer_summary(matches)
+        self.assertIn("2 answers were graded by more than one scorer", lines[0])
+        self.assertIn("1 of 2 (50%)", lines[0])
+        self.assertEqual(len(lines), 2)
+        self.assertIn("003-001", lines[1])
+        self.assertIn("2 by CR", lines[1])
+        self.assertIn("0 by JS", lines[1])
+
+    def test_no_lines_when_every_answer_has_one_scorer(self):
+        matches = [{"case_id": "003-001", "model_id": "claude", "score": 2,
+                    "result": 1.0, "scorer": "CR"}]
+        self.assertEqual(multi_scorer_summary(matches), [])
 
 
 class BuildMatchesTests(unittest.TestCase):
