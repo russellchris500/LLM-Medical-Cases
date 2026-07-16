@@ -61,6 +61,7 @@ from llm_browser import (
     SITE_INFO,
     copy_to_clipboard,
     describe_page,
+    ensure_open_page,
     make_driver,
     open_site_context,
 )
@@ -319,7 +320,7 @@ def run_api_phase(master, answers, settings, models, todo, ui):
         raise RuntimeError("{} hit an unexpected problem: {}".format(display, error))
 
 
-def interactive_login(driver, page, site_settings, ui):
+def interactive_login(driver, context, page, site_settings, ui):
     try:
         page.goto(driver.login_url, wait_until="domcontentloaded")
     except Exception:
@@ -354,6 +355,19 @@ def interactive_login(driver, page, site_settings, ui):
             site_settings["last_login_ok"] = now_iso()
             return True
         if choice != "check":
+            return False
+        # Login clicks can navigate to another page, open a NEW tab, or
+        # even close the original one - follow the user to whatever tab
+        # is actually alive before checking.
+        page = ensure_open_page(context, page)
+        if page is None:
+            ui.tell(
+                "The browser window was closed",
+                "The whole browser window is gone (some sites close it during "
+                "sign-in). Click 'Log in now' for {} again to reopen it.".format(
+                    driver.display_name
+                ),
+            )
             return False
         try:
             page.goto(driver.home_url, wait_until="domcontentloaded")
@@ -469,11 +483,15 @@ def run_browser_site(master, answers, settings, model, case_ids, ui):
                     if choice != "retry":
                         ui.log("  Skipping {}.".format(model["display_name"]))
                         return
+                    page = ensure_open_page(context, page) or page
             if not driver.is_logged_in(page):
-                if not interactive_login(driver, page, settings.browser_model(site_id), ui):
+                if not interactive_login(
+                    driver, context, page, settings.browser_model(site_id), ui
+                ):
                     ui.log("  Skipping {} (not logged in).".format(model["display_name"]))
                     return
                 settings.save()
+                page = ensure_open_page(context, page) or page
 
             images_dir = answers.ensure_images_dir()
             for index, case_id in enumerate(case_ids, start=1):
@@ -488,6 +506,11 @@ def run_browser_site(master, answers, settings, model, case_ids, ui):
                     index, len(case_ids), case_id, model["display_name"]
                 ))
                 answers.clear_images(case_id, model["variant_id"])
+                # The site (or the user) may have closed or replaced the
+                # tab since the last case; follow to a live one.
+                refreshed = ensure_open_page(context, page)
+                if refreshed is not None:
+                    page = refreshed
                 result = None
                 mode_manual = all_manual
                 while result is None:
@@ -1426,7 +1449,7 @@ class RunnerApp:
                 try:
                     page = context.pages[0] if context.pages else context.new_page()
                     if interactive_login(
-                        driver, page, self.settings.browser_model(site_id), ui
+                        driver, context, page, self.settings.browser_model(site_id), ui
                     ):
                         self.settings.save()
                         ui.log("Logged in to {}. The login is remembered for future "

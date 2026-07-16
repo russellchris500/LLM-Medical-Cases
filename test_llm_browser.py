@@ -201,6 +201,56 @@ class FramedPage(FakePage):
         self.frames = frames
 
 
+class TabFollowingTests(unittest.TestCase):
+    """Login clicks can replace, spawn, or close tabs; the program must
+    follow the user to whatever tab is actually alive."""
+
+    class Tab:
+        def __init__(self, closed=False):
+            self.closed = closed
+
+        def is_closed(self):
+            return self.closed
+
+    class Context:
+        def __init__(self, pages, dead=False):
+            self._pages = pages
+            self.dead = dead
+            self.opened = 0
+
+        @property
+        def pages(self):
+            if self.dead:
+                raise RuntimeError("browser closed")
+            return self._pages
+
+        def new_page(self):
+            self.opened += 1
+            tab = TabFollowingTests.Tab()
+            self._pages.append(tab)
+            return tab
+
+    def test_newest_live_tab_wins(self):
+        from llm_browser import ensure_open_page
+        old, new = self.Tab(), self.Tab()
+        context = self.Context([old, new])
+        self.assertIs(ensure_open_page(context, old), new)
+
+    def test_closed_tabs_are_skipped_and_reopened_when_all_gone(self):
+        from llm_browser import ensure_open_page
+        first = self.Tab(closed=True)
+        context = self.Context([first])
+        replacement = ensure_open_page(context, first)
+        self.assertIsNot(replacement, first)
+        self.assertFalse(replacement.is_closed())
+        self.assertEqual(context.opened, 1)
+
+    def test_dead_browser_returns_none(self):
+        from llm_browser import ensure_open_page
+        gone = self.Tab(closed=True)
+        self.assertIsNone(ensure_open_page(self.Context([], dead=True), gone))
+
+
 class IframeTests(unittest.TestCase):
     def test_find_first_searches_inside_iframes(self):
         from llm_browser import find_first

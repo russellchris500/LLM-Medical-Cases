@@ -219,8 +219,15 @@ class TrustLoginTests(unittest.TestCase):
             def goto(self, *args, **kwargs):
                 pass
 
+            def is_closed(self):
+                return False
+
             def screenshot(self, **kwargs):
                 raise RuntimeError("no screenshots in tests")
+
+        class StubContext:
+            def __init__(self, page):
+                self.pages = [page]
 
         class TrustUi(FakeUi):
             def ask_choice(self, title, message, options):
@@ -228,8 +235,9 @@ class TrustLoginTests(unittest.TestCase):
                 return "trust"
 
         entry = {}
+        page = StubPage()
         self.assertTrue(
-            interactive_login(StubbornDriver(), StubPage(), entry, TrustUi())
+            interactive_login(StubbornDriver(), StubContext(page), page, entry, TrustUi())
         )
         self.assertTrue(entry.get("last_login_ok"))
 

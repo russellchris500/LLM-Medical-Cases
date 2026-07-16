@@ -1104,6 +1104,28 @@ def open_site_context(playwright, site_id, headless=False):
     return context
 
 
+def ensure_open_page(context, page):
+    """The tab the user is actually on. Login flows sometimes navigate
+    away, open a new tab, or close the original one entirely - after any
+    user interaction, the newest live tab is the one that matters.
+    Returns a live page (opening a fresh tab if the site closed them
+    all), or None when the whole browser window is gone."""
+
+    def alive(candidate):
+        try:
+            return candidate is not None and not candidate.is_closed()
+        except Exception:
+            return False
+
+    try:
+        pages = [p for p in context.pages if alive(p)]
+        if pages:
+            return pages[-1]
+        return context.new_page()
+    except Exception:
+        return page if alive(page) else None
+
+
 def copy_to_clipboard(page, text):
     """Put text on the clipboard for the manual-assist path; False if the
     browser refused (caller then prints the text for manual copying)."""
