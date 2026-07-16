@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Browser automation for the healthcare LLM sites that have no API
-(OpenEvidence, UpToDate, Doximity GPT, ChatGPT for Clinicians, AMBOSS,
+(OpenEvidence, UpToDate, Doximity Ask, ChatGPT for Clinicians, AMBOSS,
 ClinicalKey AI, DynaMed, Glass Health, the GPT-OSS playground), used by
 Program 3 (run_llms.py).
 
@@ -313,9 +313,9 @@ SITE_INFO = {
         "login_url": "https://www.uptodate.com/login",
     },
     "doximity": {
-        "display_name": "Doximity GPT",
-        "home_url": "https://www.doximity.com/docs-gpt",
-        "login_url": "https://www.doximity.com/docs-gpt",
+        "display_name": "Doximity Ask",
+        "home_url": "https://www.doximity.com/ask",
+        "login_url": "https://www.doximity.com/ask",
     },
     "chatgptclinicians": {
         "display_name": "ChatGPT for Clinicians",

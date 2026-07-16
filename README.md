@@ -74,7 +74,7 @@ Used by the PI to run selected cases through selected LLMs.
   All selected API models run **in parallel** (one question at a time per
   provider, to stay inside each provider's rate limits), so the API phase
   takes only as long as the slowest provider.
-- **Browser models with no API** (OpenEvidence, UpToDate, Doximity GPT,
+- **Browser models with no API** (OpenEvidence, UpToDate, Doximity Ask,
   ChatGPT for Clinicians, AMBOSS, ClinicalKey AI, DynaMed, Glass Health, and
   the free no-login GPT-OSS playground at gpt-oss.com, pre-set to
   gpt-oss-120b) are

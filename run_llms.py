@@ -12,7 +12,7 @@ and work in the window.
 Models:
 - API models (Anthropic Claude, OpenAI GPT, Google Gemini, xAI Grok) run
   unattended once an API key is entered in Settings.
-- Browser models (OpenEvidence, UpToDate, Doximity GPT) are driven through
+- Browser models (OpenEvidence, UpToDate, Doximity Ask, and more) are driven through
   a visible browser window; the PI should stay at the computer for that
   part in case a site asks for a login or verification.
 
