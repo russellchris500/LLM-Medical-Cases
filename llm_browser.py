@@ -314,8 +314,11 @@ SITE_INFO = {
     },
     "doximity": {
         "display_name": "Doximity Ask",
+        # /ask is the chat once signed in, but it redirects logged-out
+        # visitors to a page without a sign-in form; /ask/overview is the
+        # page that carries the Log in button.
         "home_url": "https://www.doximity.com/ask",
-        "login_url": "https://www.doximity.com/ask",
+        "login_url": "https://www.doximity.com/ask/overview",
     },
     "chatgptclinicians": {
         "display_name": "ChatGPT for Clinicians",
