@@ -1,0 +1,37 @@
+{% extends "layout.html" %}
+{% block title %}People{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>People</h1>
+  <table>
+    <tr><th>Name</th><th>Email</th><th>Role</th><th>Grader #</th><th>Status</th></tr>
+    {% for person in people %}
+    <tr>
+      <td>{{ person['name'] }}</td>
+      <td>{{ person['email'] }}</td>
+      <td>{{ 'PI' if person['role'] == 'pi' else 'Grader' }}</td>
+      <td>{{ person['grader_number'] or '' }}</td>
+      <td>
+        {% if person['invite_token'] %}
+          Invited - send them:
+          <code>{{ invite_links[person['id']] }}</code>
+        {% elif person['disabled'] %}Disabled
+        {% else %}Active{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+<div class="card">
+  <h1>Invite a grader</h1>
+  <form method="post">
+    <label for="name">Name</label>
+    <input type="text" id="name" name="name" required>
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" required>
+    <p><button class="btn" type="submit">Create the invitation link</button></p>
+  </form>
+  <p class="hint">You email the link yourself - the hub sends no email, so
+  there is nothing to configure.</p>
+</div>
+{% endblock %}

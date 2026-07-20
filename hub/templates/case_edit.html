@@ -1,0 +1,29 @@
+{% extends "layout.html" %}
+{% block title %}{{ case['id'] if case else 'New case' }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{% if case %}Case {{ case['id'] }} (rubric version
+      {{ case['rubric_version'] }}){% else %}New case{% endif %}</h1>
+  <form method="post">
+    <label for="case_text">Case text (the clinical vignette / question the
+      AIs will be asked)</label>
+    <textarea id="case_text" name="case_text"
+      {% if read_only %}readonly{% endif %}>{{ form_text }}</textarea>
+    <label for="rubric">Rubric - ONE item per line. An answer must cover
+      EVERY item; each answer is then scored 0, 1, or 2 at grading time.</label>
+    <textarea id="rubric" name="rubric"
+      {% if read_only %}readonly{% endif %}>{{ form_rubric }}</textarea>
+    {% if not read_only %}
+      <p class="hint">Changing the rubric of an already-graded case bumps its
+      rubric version; grades the change affects are automatically set aside
+      for re-grading.</p>
+      <p><button class="btn" type="submit">Save case</button>
+         <a class="btn secondary" href="{{ url_for('cases.my_cases') }}">Back</a></p>
+    {% else %}
+      <p class="hint">You are viewing another grader's case - only they can
+      edit it.</p>
+      <p><a class="btn secondary" href="{{ url_for('cases.my_cases') }}">Back</a></p>
+    {% endif %}
+  </form>
+</div>
+{% endblock %}

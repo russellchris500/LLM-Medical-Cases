@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Study Hub{% endblock %} - LLM Medical Cases</title>
+<style>
+  :root { --ink:#1c2733; --line:#d8dee6; --accent:#155e94; --soft:#f4f6f9; }
+  * { box-sizing: border-box; }
+  body { font-family:'Segoe UI', Arial, sans-serif; color:var(--ink);
+         margin:0; background:var(--soft); }
+  header { background:#fff; border-bottom:1px solid var(--line);
+           padding:10px 20px; display:flex; align-items:baseline; gap:18px;
+           flex-wrap:wrap; }
+  header .brand { font-weight:bold; font-size:1.05rem; }
+  header a { color:var(--accent); text-decoration:none; }
+  header a:hover { text-decoration:underline; }
+  header .who { margin-left:auto; color:#5a6a7a; }
+  main { max-width:960px; margin:20px auto; padding:0 16px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px;
+          padding:18px 20px; margin-bottom:16px; }
+  h1 { font-size:1.25rem; margin:0 0 12px; }
+  table { border-collapse:collapse; width:100%; }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line);
+           vertical-align:top; }
+  th { color:#5a6a7a; font-weight:600; font-size:0.85rem;
+       text-transform:uppercase; letter-spacing:0.03em; }
+  .btn { display:inline-block; background:var(--accent); color:#fff;
+         border:none; border-radius:6px; padding:8px 14px; font-size:0.95rem;
+         cursor:pointer; text-decoration:none; }
+  .btn.secondary { background:#fff; color:var(--accent);
+                   border:1px solid var(--accent); }
+  .flash { background:#e7f4e7; border:1px solid #b5d9b5; border-radius:6px;
+           padding:10px 14px; margin-bottom:14px; }
+  .error { background:#fbeaea; border:1px solid #e3b3b3; border-radius:6px;
+           padding:10px 14px; margin-bottom:14px; }
+  label { display:block; margin:12px 0 4px; font-weight:600; }
+  input[type=text], input[type=email], input[type=password], textarea {
+    width:100%; padding:8px; border:1px solid var(--line); border-radius:6px;
+    font:inherit; }
+  textarea { min-height:140px; }
+  .hint { color:#5a6a7a; font-size:0.88rem; margin-top:4px; }
+  code { background:var(--soft); padding:1px 5px; border-radius:4px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">LLM Medical Cases - Study Hub</span>
+  {% if user %}
+    <a href="{{ url_for('cases.my_cases') }}">Cases</a>
+    {% if user['role'] == 'pi' %}
+      <a href="{{ url_for('auth.people') }}">People</a>
+    {% endif %}
+    <span class="who">{{ user['name'] }}
+      ({{ 'Principal investigator' if user['role'] == 'pi' else 'Grader' }})
+      &middot; <a href="{{ url_for('auth.logout') }}">Sign out</a></span>
+  {% endif %}
+</header>
+<main>
+  {% for message in get_flashed_messages() %}
+    <div class="flash">{{ message }}</div>
+  {% endfor %}
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

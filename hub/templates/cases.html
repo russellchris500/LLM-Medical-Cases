@@ -1,0 +1,40 @@
+{% extends "layout.html" %}
+{% block title %}Cases{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ 'All cases in the study' if user['role'] == 'pi' else 'My cases' }}</h1>
+  {% if user['role'] == 'grader' %}
+    <p><a class="btn" href="{{ url_for('cases.new_case') }}">New case</a></p>
+  {% endif %}
+  {% if cases %}
+  <table>
+    <tr>
+      <th>Case</th>
+      {% if user['role'] == 'pi' %}<th>Grader</th>{% endif %}
+      <th>Rubric items</th><th>Rubric v</th><th>Case text</th><th></th>
+    </tr>
+    {% for case in cases %}
+    <tr>
+      <td><a href="{{ url_for('cases.edit_case', case_id=case['id']) }}">{{ case['id'] }}</a></td>
+      {% if user['role'] == 'pi' %}<td>{{ case['owner_name'] }}</td>{% endif %}
+      <td>{{ case['rubric_items'] }}</td>
+      <td>{{ case['rubric_version'] }}</td>
+      <td>{{ case['case_text'][:110] }}{% if case['case_text']|length > 110 %}...{% endif %}</td>
+      <td>
+        {% if user['role'] == 'grader' %}
+        <form method="post" style="display:inline"
+              action="{{ url_for('cases.delete_case', case_id=case['id']) }}"
+              onsubmit="return confirm('Really delete case {{ case['id'] }}?');">
+          <button class="btn secondary" type="submit">Delete</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+    <p>No cases yet.{% if user['role'] == 'grader' %} Click <b>New case</b> to
+    write your first clinical vignette and its grading rubric.{% endif %}</p>
+  {% endif %}
+</div>
+{% endblock %}

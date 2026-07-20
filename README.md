@@ -10,6 +10,15 @@ are ranked based on their scores.
 The framework consists of six programs, run in sequence:
 
 ```
+> **In progress — Study Hub (web version).** The framework is being moved to
+> a web application (`hub/`): graders author AND grade their own cases in
+> the browser; LLMs are still run by the local Runner program (browser-site
+> models need a real browser and personal logins); graders without LLM
+> access send run requests to the PI; the PI's dashboard produces the
+> overall ranking. Phase 1 (accounts, invites, case authoring with rubric
+> versioning) is implemented — see `hub/manage.py`. The desktop programs
+> below remain fully working until the hub reaches feature parity.
+
  Program 1        Program 2        Program 3        Program 4        Program 5        Program 6
 ┌───────────┐    ┌───────────┐    ┌───────────┐    ┌───────────┐    ┌───────────┐    ┌───────────┐
 │   Case    │ em │   Case    │    │    LLM    │    │  Scoring  │ em │  Answer   │ em │    LLM    │

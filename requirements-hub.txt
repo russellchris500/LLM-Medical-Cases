@@ -1,0 +1,3 @@
+# The Study Hub web application (the local Runner and the legacy desktop
+# programs still need only the Python standard library + Playwright).
+flask>=3.0

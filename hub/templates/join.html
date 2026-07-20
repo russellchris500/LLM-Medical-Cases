@@ -1,0 +1,21 @@
+{% extends "layout.html" %}
+{% block title %}Join the study{% endblock %}
+{% block content %}
+<div class="card" style="max-width:460px; margin:60px auto;">
+  <h1>Welcome to the study</h1>
+  <p>This invitation is for <b>{{ invite['name'] }}</b>
+     ({{ invite['email'] }}), joining as
+     {{ 'principal investigator' if invite['role'] == 'pi' else 'a grader' }}.</p>
+  <p class="hint">Please do not enter real patient information anywhere in
+  this system - cases are invented clinical vignettes.</p>
+  <form method="post">
+    <label for="name">Your name (as it should appear)</label>
+    <input type="text" id="name" name="name" value="{{ invite['name'] }}">
+    <label for="password">Choose a password (8+ characters)</label>
+    <input type="password" id="password" name="password" required>
+    <label for="confirm">Repeat the password</label>
+    <input type="password" id="confirm" name="confirm" required>
+    <p><button class="btn" type="submit">Create my account</button></p>
+  </form>
+</div>
+{% endblock %}
