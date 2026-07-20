@@ -1,0 +1,32 @@
+{% extends "layout.html" %}
+{% block title %}Rubric flags{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Open rubric flags{{ ' (all cases)' if user['role'] == 'pi' else ' on my cases' }}</h1>
+  {% if flags %}
+  <table>
+    <tr><th>Case</th><th>Item</th><th>Rubric item</th><th>Problem</th>
+        <th>Flagged by</th><th></th></tr>
+    {% for flag in flags %}
+    <tr>
+      <td><a href="{{ url_for('cases.edit_case', case_id=flag['case_id']) }}">{{ flag['case_id'] }}</a></td>
+      <td>{{ flag['item_index'] + 1 }}</td>
+      <td>{{ flag['item_text'] }}</td>
+      <td>{{ flag['note'] }}</td>
+      <td>{{ flag['flagger'] }}</td>
+      <td>
+        {% if user['role'] != 'pi' %}
+        <form method="post" style="display:inline">
+          <input type="hidden" name="resolve" value="{{ flag['id'] }}">
+          <button class="btn secondary" type="submit">Mark resolved</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="hint">Fix a flagged rubric on the case's edit page - the change
+  instantly re-queues exactly the grades it affects, for every grader.</p>
+  {% else %}<p>No open flags.</p>{% endif %}
+</div>
+{% endblock %}

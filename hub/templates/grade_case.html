@@ -1,0 +1,38 @@
+{% extends "layout.html" %}
+{% block title %}Grade {{ case['id'] }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Case {{ case['id'] }} (rubric version {{ case['rubric_version'] }})</h1>
+  <p style="white-space:pre-wrap">{{ case['case_text'] }}</p>
+  <h1 style="font-size:1.05rem">Rubric</h1>
+  <ol>
+    {% for item in rubric %}<li>{{ item }}</li>{% endfor %}
+  </ol>
+  <form method="post" action="{{ url_for('grading.flag_item', case_id=case['id']) }}">
+    <label>Flag a rubric item as too difficult / wrong (grading continues
+      against the current wording):</label>
+    <select name="item_index">
+      {% for item in rubric %}
+        <option value="{{ loop.index0 }}">{{ loop.index }}. {{ item[:70] }}</option>
+      {% endfor %}
+    </select>
+    <input type="text" name="note" placeholder="What is wrong with it?" style="width:50%">
+    <button class="btn secondary" type="submit">Flag</button>
+  </form>
+</div>
+<div class="card">
+  <h1>Answers (anonymized)</h1>
+  <table>
+    <tr><th>Answer</th><th>Status</th><th></th></tr>
+    {% for entry in entries %}
+    <tr>
+      <td>{{ entry['label'] }}</td>
+      <td>{% if entry['graded'] %}scored {{ entry['score'] }}{% else %}not graded{% endif %}</td>
+      <td><a class="btn secondary"
+             href="{{ url_for('grading.answer_page', case_id=case['id'], label=entry['label']) }}">
+          {{ 'Re-grade' if entry['graded'] else 'Grade' }}</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

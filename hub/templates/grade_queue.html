@@ -1,0 +1,28 @@
+{% extends "layout.html" %}
+{% block title %}Grade{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Grading queue</h1>
+  <p class="hint">Answers are anonymized and the letters are shuffled for
+  every case - answer A on one case is NOT the same AI as on another.</p>
+  {% if rows %}
+  <table>
+    <tr><th>Case</th><th>Kind</th><th>Answers</th><th>Graded</th><th></th></tr>
+    {% for row in rows %}
+    <tr>
+      <td>{{ row['assignment']['case_id'] }}</td>
+      <td>{{ 'my case' if row['assignment']['kind'] == 'own' else 'cross-grading' }}</td>
+      <td>{{ row['answers'] }}</td>
+      <td>{{ row['graded'] }}</td>
+      <td><a class="btn secondary"
+             href="{{ url_for('grading.case_page', case_id=row['assignment']['case_id']) }}">
+          {{ 'Review' if row['graded'] == row['answers'] and row['answers'] else 'Grade' }}</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+    <p>Nothing to grade yet - answers appear here once your cases have been
+    run (or the PI assigns you another grader's case).</p>
+  {% endif %}
+</div>
+{% endblock %}

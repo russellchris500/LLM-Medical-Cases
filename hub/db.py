@@ -93,10 +93,63 @@ CREATE TABLE IF NOT EXISTS answers (
 );
 """
 
-# Future additive changes: append ("0003", "ALTER TABLE ...") entries.
+SCHEMA_0003 = """
+CREATE TABLE IF NOT EXISTS grading_assignments (
+    id INTEGER PRIMARY KEY,
+    grader_id INTEGER NOT NULL REFERENCES users(id),
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    kind TEXT NOT NULL DEFAULT 'own' CHECK (kind IN ('own', 'cross')),
+    assigned_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    UNIQUE (grader_id, case_id)
+);
+
+-- The per-grader blinding: which shuffled letter maps to which answer.
+-- Created server-side, never sent to anyone; stable once assigned.
+CREATE TABLE IF NOT EXISTS blind_labels (
+    id INTEGER PRIMARY KEY,
+    assignment_id INTEGER NOT NULL REFERENCES grading_assignments(id),
+    label TEXT NOT NULL,
+    answer_id INTEGER NOT NULL REFERENCES answers(id),
+    UNIQUE (assignment_id, label),
+    UNIQUE (assignment_id, answer_id)
+);
+
+CREATE TABLE IF NOT EXISTS grades (
+    id INTEGER PRIMARY KEY,
+    assignment_id INTEGER NOT NULL REFERENCES grading_assignments(id),
+    answer_id INTEGER NOT NULL REFERENCES answers(id),
+    rubric_results TEXT NOT NULL,          -- JSON list of booleans
+    unnecessary_risk INTEGER,              -- NULL = never applied
+    poor_approach INTEGER,                 -- NULL = never applied
+    score INTEGER NOT NULL CHECK (score IN (0, 1, 2)),
+    comment TEXT NOT NULL DEFAULT '',
+    rubric_version INTEGER NOT NULL,
+    superseded INTEGER NOT NULL DEFAULT 0,
+    superseded_reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS grades_one_active
+    ON grades (assignment_id, answer_id) WHERE superseded = 0;
+
+CREATE TABLE IF NOT EXISTS rubric_flags (
+    id INTEGER PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    item_index INTEGER NOT NULL,
+    item_text TEXT NOT NULL,
+    note TEXT NOT NULL,
+    flagged_by INTEGER NOT NULL REFERENCES users(id),
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+"""
+
+# Future additive changes: append ("0004", "ALTER TABLE ...") entries.
 MIGRATIONS = [
     ("0001", SCHEMA),
     ("0002", SCHEMA_0002),
+    ("0003", SCHEMA_0003),
 ]
 
 

@@ -9,6 +9,7 @@ Same rules as the desktop Case Editor, enforced centrally:
   phases use to invalidate exactly the grades a change affects.
 """
 
+import difflib
 import json
 
 from flask import (
@@ -16,6 +17,7 @@ from flask import (
 )
 
 from case_editor import now_iso
+from score_answers import compute_score, grade_survives_removal
 from .auth import login_required
 from .db import get_db
 
@@ -64,22 +66,102 @@ def create_case(db, owner, case_text, rubric):
     return case_id
 
 
+def rubric_ops(old, new):
+    """What happened to each old item, computed by sequence diff: kept,
+    reworded (position-paired replacement), removed, or brand-new."""
+    ops = {"removed": [], "reworded": [], "added": []}
+    matcher = difflib.SequenceMatcher(None, old, new, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "delete":
+            ops["removed"].extend(range(i1, i2))
+        elif tag == "insert":
+            ops["added"].extend(range(j1, j2))
+        elif tag == "replace":
+            paired = min(i2 - i1, j2 - j1)
+            ops["reworded"].extend(range(i1, i1 + paired))
+            ops["removed"].extend(range(i1 + paired, i2))
+            ops["added"].extend(range(j1 + paired, j2))
+    return ops
+
+
+def invalidate_grades(db, case_id, ops, from_version, new_version):
+    """The blast-radius rules, applied instantly to every grader's grades
+    on this case (no update files, no emails):
+
+    - pure removals: grades that covered the removed item(s), or that
+      missed some KEPT item anyway, are carried over losslessly (results
+      remapped, score recomputed); only grades that missed ONLY removed
+      items are set aside for re-grading (their risk/approach questions
+      were never asked).
+    - anything added or reworded: every older grade on the case is set
+      aside for re-grading.
+    Returns (requeued, carried)."""
+    clean_removal = not (ops["added"] or ops["reworded"])
+    removed = ops["removed"]
+    requeued = carried = 0
+    rows = db.execute(
+        "SELECT grades.* FROM grades JOIN grading_assignments ga "
+        "ON ga.id = grades.assignment_id "
+        "WHERE ga.case_id = ? AND grades.superseded = 0",
+        (case_id,),
+    ).fetchall()
+    for grade in rows:
+        if grade["rubric_version"] >= new_version:
+            continue
+        results = json.loads(grade["rubric_results"])
+        if (
+            clean_removal
+            and grade["rubric_version"] == from_version
+            and grade_survives_removal({"rubric_results": results}, removed)
+        ):
+            new_results = [
+                r for i, r in enumerate(results) if i not in removed
+            ]
+            score = compute_score(
+                new_results, grade["unnecessary_risk"], grade["poor_approach"]
+            )
+            db.execute(
+                "UPDATE grades SET rubric_results = ?, score = ?, "
+                "rubric_version = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(new_results), score, new_version, now_iso(),
+                 grade["id"]),
+            )
+            carried += 1
+        else:
+            db.execute(
+                "UPDATE grades SET superseded = 1, superseded_reason = ?, "
+                "updated_at = ? WHERE id = ?",
+                ("rubric changed to version {}".format(new_version), now_iso(),
+                 grade["id"]),
+            )
+            requeued += 1
+    return requeued, carried
+
+
 def update_case(db, row, case_text, rubric):
-    """Apply an edit; rubric content changes bump rubric_version and are
-    recorded in rubric_history."""
+    """Apply an edit; rubric content changes bump rubric_version, are
+    recorded in rubric_history, and instantly re-queue exactly the grades
+    the change affects. Returns an info dict for the page's message."""
     old_rubric = json.loads(row["rubric"])
     version = row["rubric_version"]
     history = json.loads(row["rubric_history"])
+    info = {"rubric_changed": False, "new_version": version,
+            "requeued": 0, "carried": 0}
     if rubric != old_rubric:
+        ops = rubric_ops(old_rubric, rubric)
         history.append({
             "from_version": version,
             "to_version": version + 1,
             "old_rubric": old_rubric,
             "new_rubric": list(rubric),
-            "ops": None,  # structured ops arrive with the grading phase
+            "ops": ops,
             "edited_at": now_iso(),
         })
+        info["requeued"], info["carried"] = invalidate_grades(
+            db, row["id"], ops, version, version + 1
+        )
         version += 1
+        info.update(rubric_changed=True, new_version=version)
     db.execute(
         "UPDATE cases SET case_text = ?, rubric = ?, rubric_version = ?, "
         "rubric_history = ?, updated_at = ? WHERE id = ?",
@@ -87,6 +169,7 @@ def update_case(db, row, case_text, rubric):
          now_iso(), row["id"]),
     )
     db.commit()
+    return info
 
 
 @bp.route("/cases")
@@ -149,14 +232,18 @@ def edit_case(case_id):
             request.form.get("case_text"), request.form.get("rubric")
         )
         if error is None:
-            old_version = row["rubric_version"]
-            update_case(db, row, case_text, rubric)
-            row = load_case(db, case_id, owner_id)
-            if row["rubric_version"] != old_version:
-                flash(
-                    "Saved case {} - the rubric changed, so it is now rubric "
-                    "version {}.".format(case_id, row["rubric_version"])
-                )
+            info = update_case(db, row, case_text, rubric)
+            if info["rubric_changed"]:
+                message = ("Saved case {} - the rubric changed, so it is now "
+                           "rubric version {}.".format(case_id, info["new_version"]))
+                if info["requeued"]:
+                    message += (" {} grade(s) affected by the change were set "
+                                "aside and will come back for re-grading."
+                                .format(info["requeued"]))
+                if info["carried"]:
+                    message += (" {} grade(s) were carried over unchanged."
+                                .format(info["carried"]))
+                flash(message)
             else:
                 flash("Saved case {}.".format(case_id))
             return redirect(url_for("cases.my_cases"))

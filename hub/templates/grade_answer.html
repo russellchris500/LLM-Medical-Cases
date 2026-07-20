@@ -1,0 +1,94 @@
+{% extends "layout.html" %}
+{% block title %}{{ case['id'] }} answer {{ answer['label'] }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Case {{ case['id'] }} - answer {{ answer['label'] }}</h1>
+  <p class="hint">
+    {% if run_blind %}This answer was run by someone else - you are grading
+    fully blinded.{% else %}Note: this answer came from a run YOU made, so
+    you may have seen which AI wrote it (recorded for the methods
+    section).{% endif %}
+  </p>
+  <details open>
+    <summary style="cursor:pointer;font-weight:600">Case text</summary>
+    <p style="white-space:pre-wrap">{{ case['case_text'] }}</p>
+  </details>
+  {% if image_count %}
+    <p>Images in this answer:
+    {% for index in range(image_count) %}
+      <a href="{{ url_for('grading.answer_image', case_id=case['id'],
+                          label=answer['label'], index=index) }}"
+         target="_blank">image {{ index + 1 }}</a>{{ ", " if not loop.last }}
+    {% endfor %}</p>
+  {% endif %}
+  <div style="border:1px solid var(--line); border-radius:6px; padding:4px 14px;
+              background:#fcfcfd">{{ answer_body | safe }}</div>
+</div>
+<div class="card">
+  <h1>Your grading</h1>
+  <form method="post" id="gradeform">
+    {% for item in rubric %}
+      <p><b>{{ loop.index }}. {{ item }}</b><br>
+      {% set index = loop.index0 %}
+      {% set current = form['results'][index] if index < form['results']|length else None %}
+      <label style="display:inline;font-weight:normal">
+        <input type="radio" name="item_{{ index }}" value="yes"
+          {% if current == true %}checked{% endif %}> Covered</label>
+      &nbsp;
+      <label style="display:inline;font-weight:normal">
+        <input type="radio" name="item_{{ index }}" value="no"
+          {% if current == false %}checked{% endif %}> Missed</label>
+      </p>
+    {% endfor %}
+    <p id="riskrow"><b>Did the answer take any unnecessary risk with the
+      patient?</b><br>
+      <label style="display:inline;font-weight:normal">
+        <input type="radio" name="risk" value="yes"
+          {% if form['risk'] == 1 %}checked{% endif %}> Yes</label>
+      &nbsp;
+      <label style="display:inline;font-weight:normal">
+        <input type="radio" name="risk" value="no"
+          {% if form['risk'] == 0 %}checked{% endif %}> No</label>
+    </p>
+    <p id="poorrow"><b>Was the approach poor, even though everything was
+      covered?</b><br>
+      <label style="display:inline;font-weight:normal">
+        <input type="radio" name="poor" value="yes"
+          {% if form['poor'] == 1 %}checked{% endif %}> Yes</label>
+      &nbsp;
+      <label style="display:inline;font-weight:normal">
+        <input type="radio" name="poor" value="no"
+          {% if form['poor'] == 0 %}checked{% endif %}> No</label>
+    </p>
+    <p class="hint">Score 0 = any item missed or unnecessary risk;
+       1 = all covered but poor approach; 2 = all covered, sound approach.
+       The risk question only applies once every item is Covered.</p>
+    <label for="comment">Comment for the record (optional)</label>
+    <input type="text" id="comment" name="comment" value="{{ form['comment'] }}">
+    <p><button class="btn" type="submit">Save the grade</button>
+       <a class="btn secondary"
+          href="{{ url_for('grading.case_page', case_id=case['id']) }}">Back</a></p>
+  </form>
+</div>
+<script>
+(function () {
+  var form = document.getElementById('gradeform');
+  function update() {
+    var allCovered = true;
+    {% for item in rubric %}
+    (function () {
+      var picked = form.querySelector('input[name=item_{{ loop.index0 }}]:checked');
+      if (!picked || picked.value !== 'yes') allCovered = false;
+    })();
+    {% endfor %}
+    var riskYes = form.querySelector('input[name=risk][value=yes]');
+    var riskPicked = form.querySelector('input[name=risk]:checked');
+    document.getElementById('riskrow').style.opacity = allCovered ? 1 : 0.45;
+    var poorApplies = allCovered && riskPicked && riskPicked.value === 'no';
+    document.getElementById('poorrow').style.opacity = poorApplies ? 1 : 0.45;
+  }
+  form.addEventListener('change', update);
+  update();
+})();
+</script>
+{% endblock %}

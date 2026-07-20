@@ -1,0 +1,34 @@
+{% extends "layout.html" %}
+{% block title %}Cross-grading{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Cross-grading assignments</h1>
+  <p class="hint">Assigning a case to a second grader lets the study measure
+  inter-rater agreement; both grades count in the ranking.</p>
+  {% if crosses %}
+  <table>
+    <tr><th>Case</th><th>Grader</th><th>Assigned</th></tr>
+    {% for cross in crosses %}
+    <tr><td>{{ cross['case_id'] }}</td><td>{{ cross['grader_name'] }}</td>
+        <td>{{ cross['created_at'][:10] }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+  <form method="post">
+    <label for="grader_id">Grader</label>
+    <select id="grader_id" name="grader_id">
+      {% for grader in graders %}
+        <option value="{{ grader['id'] }}">{{ grader['name'] }}</option>
+      {% endfor %}
+    </select>
+    <label>Cases (their own cases are skipped automatically)</label>
+    {% for case in cases %}
+      <div><label style="display:inline;font-weight:normal">
+        <input type="checkbox" name="case_id" value="{{ case['id'] }}">
+        {{ case['id'] }} ({{ case['owner_name'] }}) -
+        {{ case['case_text'][:70] }}</label></div>
+    {% endfor %}
+    <p><button class="btn" type="submit">Assign for cross-grading</button></p>
+  </form>
+</div>
+{% endblock %}
