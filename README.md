@@ -10,14 +10,20 @@ are ranked based on their scores.
 The framework consists of six programs, run in sequence:
 
 ```
-> **In progress — Study Hub (web version).** The framework is being moved to
-> a web application (`hub/`): graders author AND grade their own cases in
-> the browser; LLMs are still run by the local Runner program (browser-site
-> models need a real browser and personal logins); graders without LLM
-> access send run requests to the PI; the PI's dashboard produces the
-> overall ranking. Phase 1 (accounts, invites, case authoring with rubric
-> versioning) is implemented — see `hub/manage.py`. The desktop programs
-> below remain fully working until the hub reaches feature parity.
+> **NEW — Study Hub (web version), implemented.** The study can now run as
+> a web application (`hub/`, Flask + SQLite — see `DEPLOY.md`):
+> **graders** author their cases, choose which LLMs to run them through
+> (running them with their own local Runner, or sending the job to the PI
+> if they lack access), and grade the blinded answers in the browser;
+> rubric flags and fixes propagate instantly with targeted re-grading; the
+> **PI** fulfills run requests with their Runner and gets a live Elo
+> ranking dashboard (with inter-rater agreement) plus CSV export and
+> snapshots. LLMs are still executed by the local **Hub Runner** program
+> (`Run Hub Jobs.pyw`) because the browser-site models need a real browser
+> and personal logins; API keys and site credentials never leave the
+> runner's computer. `python -m hub.manage import-legacy` moves an
+> existing desktop-programs study into the hub. The desktop programs below
+> keep working; retire them at your own pace.
 
  Program 1        Program 2        Program 3        Program 4        Program 5        Program 6
 ┌───────────┐    ┌───────────┐    ┌───────────┐    ┌───────────┐    ┌───────────┐    ┌───────────┐

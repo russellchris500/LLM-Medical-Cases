@@ -1,0 +1,18 @@
+{% extends "layout.html" %}
+{% block title %}My results{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>My cases - average score per model</h1>
+  <p class="hint">Only your own cases and your own grades; the study-wide
+  Elo ranking is produced by the PI across all graders.</p>
+  {% if results %}
+  <table>
+    <tr><th>Model</th><th>Graded answers</th><th>Average score (0-2)</th></tr>
+    {% for row in results %}
+      <tr><td>{{ row['display'] }}</td><td>{{ row['n'] }}</td>
+          <td>{{ row['average'] }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>No grades yet.</p>{% endif %}
+</div>
+{% endblock %}

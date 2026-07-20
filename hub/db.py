@@ -145,11 +145,22 @@ CREATE TABLE IF NOT EXISTS rubric_flags (
 );
 """
 
-# Future additive changes: append ("0004", "ALTER TABLE ...") entries.
+SCHEMA_0004 = """
+CREATE TABLE IF NOT EXISTS ranking_snapshots (
+    id INTEGER PRIMARY KEY,
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    summary TEXT NOT NULL DEFAULT '',
+    results TEXT NOT NULL,                 -- JSON: ratings, stats, agreement
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+"""
+
+# Future additive changes: append ("0005", "ALTER TABLE ...") entries.
 MIGRATIONS = [
     ("0001", SCHEMA),
     ("0002", SCHEMA_0002),
     ("0003", SCHEMA_0003),
+    ("0004", SCHEMA_0004),
 ]
 
 

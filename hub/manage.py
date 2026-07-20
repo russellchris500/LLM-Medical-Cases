@@ -2,12 +2,22 @@
 
     python -m hub.manage init-db
     python -m hub.manage create-pi "Dr Name" pi@example.org
+    python -m hub.manage import-legacy grader@example.org [folder]
     python -m hub.manage run           (development server on port 5000)
+
+import-legacy moves an existing desktop-programs study into the hub:
+cases from master_cases.json, collected answers (with their image
+files), and grades from scores_*.json + the key files in
+scoring_packages/. Everything is owned by the given grader account.
 
 STUDYHUB_DATA sets where study.db and answer files live (default:
 ./hub_data next to where you run the command)."""
 
 import getpass
+import glob
+import json
+import os
+import shutil
 import sys
 
 from werkzeug.security import generate_password_hash
@@ -15,6 +25,144 @@ from werkzeug.security import generate_password_hash
 from . import create_app
 from .auth import create_user
 from .db import connect
+
+
+def import_legacy(app, grader_email, folder="."):
+    """Returns a report dict; raises SystemExit with a message on setup
+    problems (unknown grader, missing master file)."""
+    db = connect(app.config["DATABASE"])
+    try:
+        grader = db.execute(
+            "SELECT * FROM users WHERE email = ? AND role = 'grader'",
+            (grader_email,),
+        ).fetchone()
+        if grader is None:
+            raise SystemExit(
+                "No grader account with email {} - invite them on the People "
+                "page first.".format(grader_email)
+            )
+        master_path = os.path.join(folder, "master_cases.json")
+        if not os.path.exists(master_path):
+            raise SystemExit("No master_cases.json in {}.".format(folder))
+        report = {"cases": 0, "answers": 0, "grades": 0, "skipped": []}
+
+        with open(master_path, "r", encoding="utf-8") as f:
+            master = json.load(f)
+        for case in master.get("cases", []):
+            db.execute(
+                "INSERT OR IGNORE INTO cases (id, owner_id, case_number, "
+                "case_text, rubric, rubric_version, rubric_history, "
+                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (case["case_id"], grader["id"], case["case_number"],
+                 case["case_text"], json.dumps(case["rubric"]),
+                 case.get("rubric_version", 1),
+                 json.dumps(case.get("rubric_history", [])),
+                 case.get("created_at", ""), case.get("updated_at", "")),
+            )
+            report["cases"] += 1
+
+        answers_path = os.path.join(folder, "answers.json")
+        if os.path.exists(answers_path):
+            with open(answers_path, "r", encoding="utf-8") as f:
+                answers = json.load(f)
+            for record in answers.get("answers", []):
+                if record.get("status") not in ("ok", "ok_manual"):
+                    continue
+                image_paths = []
+                subdir = "{}_{}".format(record["case_id"], grader["id"])
+                for source in record.get("images", []):
+                    source_path = os.path.join(folder, source)
+                    if not os.path.exists(source_path):
+                        continue
+                    target_dir = os.path.join(app.config["ANSWER_DIR"], subdir)
+                    os.makedirs(target_dir, exist_ok=True)
+                    target = os.path.join(target_dir, os.path.basename(source))
+                    shutil.copyfile(source_path, target)
+                    image_paths.append(
+                        os.path.relpath(target, app.config["ANSWER_DIR"])
+                    )
+                db.execute(
+                    "INSERT INTO answers (case_id, run_by, llm_id, model_name, "
+                    "variant_id, model_display_name, response_text, image_paths, "
+                    "thinking_setting, model_reported, deep_thinking, status, "
+                    "case_text_sha256, rubric_version_at_run, run_by_owner) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1) "
+                    "ON CONFLICT (case_id, variant_id, run_by) DO NOTHING",
+                    (record["case_id"], grader["id"],
+                     record.get("llm_id", record["model_id"]),
+                     record.get("model_name", ""), record["model_id"],
+                     record.get("model_display_name", record["model_id"]),
+                     record.get("response_text", ""), json.dumps(image_paths),
+                     record.get("thinking_setting", ""),
+                     record.get("model_reported", ""),
+                     1 if record.get("deep_thinking", True) else 0,
+                     record.get("status", "ok"),
+                     record.get("case_text_sha256", ""),
+                     record.get("rubric_version", 1)),
+                )
+                report["answers"] += 1
+
+        # Grades: scores files joined through the package key files.
+        keys = {}
+        for key_path in glob.glob(
+            os.path.join(folder, "scoring_packages", "*_KEY_DO_NOT_SEND.json")
+        ):
+            with open(key_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("package_id"):
+                keys[data["package_id"]] = data.get("key", {})
+        for scores_path in glob.glob(os.path.join(folder, "scores_*.json")):
+            with open(scores_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            key = keys.get(data.get("package_id"))
+            if key is None:
+                report["skipped"].append(
+                    "{}: no matching key file".format(os.path.basename(scores_path))
+                )
+                continue
+            for record in data.get("scores", []):
+                entry = (key.get(record["case_id"]) or {}).get(record["label"])
+                if entry is None:
+                    continue
+                answer = db.execute(
+                    "SELECT id FROM answers WHERE case_id = ? AND variant_id = ? "
+                    "AND run_by = ?",
+                    (record["case_id"], entry["model_id"], grader["id"]),
+                ).fetchone()
+                if answer is None:
+                    continue
+                db.execute(
+                    "INSERT OR IGNORE INTO grading_assignments "
+                    "(grader_id, case_id, kind) VALUES (?, ?, 'own')",
+                    (grader["id"], record["case_id"]),
+                )
+                assignment = db.execute(
+                    "SELECT id FROM grading_assignments WHERE grader_id = ? "
+                    "AND case_id = ?",
+                    (grader["id"], record["case_id"]),
+                ).fetchone()
+                existing = db.execute(
+                    "SELECT id FROM grades WHERE assignment_id = ? AND "
+                    "answer_id = ? AND superseded = 0",
+                    (assignment["id"], answer["id"]),
+                ).fetchone()
+                if existing is not None:
+                    continue
+                db.execute(
+                    "INSERT INTO grades (assignment_id, answer_id, "
+                    "rubric_results, unnecessary_risk, poor_approach, score, "
+                    "comment, rubric_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (assignment["id"], answer["id"],
+                     json.dumps(record.get("rubric_results", [])),
+                     record.get("unnecessary_risk"),
+                     record.get("poor_approach"), record.get("score", 0),
+                     record.get("comment", ""), record.get("rubric_version", 1)),
+                )
+                report["grades"] += 1
+        db.commit()
+        return report
+    finally:
+        db.close()
 
 
 def main(argv=None):
@@ -53,6 +201,20 @@ def main(argv=None):
         finally:
             db.close()
         print("PI account created for {} <{}>.".format(name, email))
+        return 0
+
+    if command == "import-legacy":
+        if len(argv) not in (2, 3):
+            print("Usage: python -m hub.manage import-legacy grader@example.org "
+                  "[folder]")
+            return 1
+        folder = argv[2] if len(argv) == 3 else "."
+        report = import_legacy(app, argv[1], folder)
+        print("Imported {} case(s), {} answer(s), {} grade(s).".format(
+            report["cases"], report["answers"], report["grades"]
+        ))
+        for line in report["skipped"]:
+            print("Skipped: " + line)
         return 0
 
     if command == "run":

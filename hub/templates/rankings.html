@@ -1,0 +1,65 @@
+{% extends "layout.html" %}
+{% block title %}Rankings{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>LLM rankings (live)</h1>
+  {% if payload %}
+    <p class="hint">{{ payload['matches'] }} graded answers fitted at once
+    (logistic regression on the Elo curve, {{ payload['iterations'] }}
+    passes). Higher Elo = stronger; the average case is 1500.</p>
+    {% for line in payload['agreement'] %}
+      <p class="hint">{{ line }}</p>
+    {% endfor %}
+    <table>
+      <tr><th>Rank</th><th>Model</th><th>Elo</th><th>Graded</th>
+          <th>Avg score</th><th>2s / 1s / 0s</th><th>Win vs avg case</th></tr>
+      {% for row in payload['llms'] %}
+      <tr>
+        <td>{{ row['rank'] }}</td><td>{{ row['display'] }}</td>
+        <td>{{ row['elo'] }}</td><td>{{ row['n'] }}</td>
+        <td>{{ row['average'] }}</td><td>{{ row['counts'] }}</td>
+        <td>{{ row['win_vs_average'] }}%</td>
+      </tr>
+      {% endfor %}
+    </table>
+    <p style="margin-top:10px">
+      <a class="btn secondary" href="{{ url_for('rankings.rankings_csv') }}">Download CSV</a>
+      <form method="post" action="{{ url_for('rankings.snapshot') }}" style="display:inline">
+        <button class="btn secondary" type="submit">Save a snapshot</button>
+      </form>
+    </p>
+  {% else %}
+    <p>No usable grades yet.</p>
+  {% endif %}
+</div>
+{% if payload %}
+<div class="card">
+  <h1>Case difficulty</h1>
+  <p class="hint">Higher Elo = harder case (the AIs scored worse on it).</p>
+  <table>
+    <tr><th>Case</th><th>Elo</th></tr>
+    {% for case in payload['cases'] %}
+      <tr><td>{{ case['case_id'] }}</td><td>{{ case['elo'] }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+{% if excluded %}
+<div class="card">
+  <h1>Awaiting re-grade (left out of the fit)</h1>
+  {% for line in excluded %}<p class="hint">{{ line }}</p>{% endfor %}
+</div>
+{% endif %}
+{% if snapshots %}
+<div class="card">
+  <h1>Snapshots</h1>
+  <table>
+    <tr><th>When</th><th>Summary</th><th>By</th></tr>
+    {% for snap in snapshots %}
+      <tr><td>{{ snap['created_at'][:16].replace('T', ' ') }}</td>
+          <td>{{ snap['summary'] }}</td><td>{{ snap['author'] }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+{% endblock %}
