@@ -1,0 +1,73 @@
+{% extends "layout.html" %}
+{% block title %}Run jobs{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ 'Run jobs (all)' if user['role'] == 'pi' else 'My run jobs' }}</h1>
+  {% if user['role'] == 'pi' %}
+    <p class="hint">Jobs assigned to you appear in your local Runner program
+    (Settings &gt; Hub) - run them there; answers upload automatically.</p>
+  {% endif %}
+  {% if jobs %}
+  <table>
+    <tr><th>#</th><th>Cases</th><th>LLMs</th><th>Requested by</th>
+        <th>Runs on</th><th>Status</th><th>Answers</th><th></th></tr>
+    {% for job in jobs %}
+    <tr>
+      <td>{{ job['id'] }}</td>
+      <td>{{ job['case_list'] }}</td>
+      <td>{{ job['llm_list'] }}</td>
+      <td>{{ job['requester_name'] }}</td>
+      <td>{{ job['assignee_name'] }}'s Runner</td>
+      <td>{{ job['status'] }}{% if job['status_note'] %} - {{ job['status_note'] }}{% endif %}</td>
+      <td>{{ job['received'] }} / {{ job['expected'] }}</td>
+      <td>
+        {% if job['status'] == 'open' and (user['role'] == 'pi' or job['requested_by'] == user['id']) %}
+        <form method="post" action="{{ url_for('runs.cancel_job', job_id=job['id']) }}"
+              style="display:inline">
+          <button class="btn secondary" type="submit">Cancel</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>No run jobs yet.</p>{% endif %}
+</div>
+
+{% if user['role'] == 'grader' %}
+<div class="card">
+  <h1>New run job</h1>
+  {% if my_cases %}
+  <form method="post">
+    <label>Cases</label>
+    {% for case in my_cases %}
+      <div><label style="display:inline;font-weight:normal">
+        <input type="checkbox" name="case_id" value="{{ case['id'] }}">
+        {{ case['id'] }} - {{ case['case_text'][:80] }}</label></div>
+    {% endfor %}
+    <label>LLMs to ask</label>
+    {% for llm_id, label in llm_choices %}
+      <div><label style="display:inline;font-weight:normal">
+        <input type="checkbox" name="llm_id" value="{{ llm_id }}"> {{ label }}</label></div>
+    {% endfor %}
+    <label>Who runs it?</label>
+    <div><label style="display:inline;font-weight:normal">
+      <input type="radio" name="assignee" value="me" checked>
+      I run it myself (my computer, my API keys and site logins)</label></div>
+    <div><label style="display:inline;font-weight:normal">
+      <input type="radio" name="assignee" value="pi">
+      Send it to the PI (I do not have access to these LLMs; answers come
+      back here for grading, fully blinded)</label></div>
+    <label for="note">Note (optional)</label>
+    <input type="text" id="note" name="note">
+    <p><button class="btn" type="submit">Create the run job</button></p>
+  </form>
+  <p class="hint">The exact model name (e.g. claude-opus-4-8) is taken from
+  the Runner that executes the job; every answer records the full identity
+  it was actually run with.</p>
+  {% else %}
+    <p>Write some cases first - then you can run them.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

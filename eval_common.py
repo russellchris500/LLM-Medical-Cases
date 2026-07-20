@@ -73,8 +73,11 @@ def rubric_version(case):
 
 
 def split_case_id(case_id):
+    """(provider/grader number, case number) for sorting. Accepts both the
+    classic 003-001 form and the hub's G003-001 form."""
     provider, number = case_id.split("-")
-    return int(provider), int(number)
+    digits = re.sub(r"[^0-9]", "", provider) or "0"
+    return int(digits), int(number)
 
 
 def sort_case_ids(case_ids):
@@ -404,6 +407,8 @@ DEFAULT_SETTINGS = {
         # is known, so the model name is pre-filled (still editable).
         "gptoss": {"username": "", "password": "", "model": "gpt-oss-120b", "last_login_ok": None},
     },
+    # The Study Hub this Runner belongs to (web version of the study).
+    "hub": {"url": "", "token": ""},
     "options": {
         "deep_thinking": True,
         "request_timeout_s": 180,

@@ -48,6 +48,8 @@
   <span class="brand">LLM Medical Cases - Study Hub</span>
   {% if user %}
     <a href="{{ url_for('cases.my_cases') }}">Cases</a>
+    <a href="{{ url_for('runs.run_jobs') }}">Run jobs</a>
+    <a href="{{ url_for('runner_api.runner_tokens') }}">Runner tokens</a>
     {% if user['role'] == 'pi' %}
       <a href="{{ url_for('auth.people') }}">People</a>
     {% endif %}

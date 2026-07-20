@@ -51,9 +51,52 @@ CREATE TABLE IF NOT EXISTS cases (
 );
 """
 
-# Future additive changes: append ("0002", "ALTER TABLE ...") entries.
+SCHEMA_0002 = """
+CREATE TABLE IF NOT EXISTS run_jobs (
+    id INTEGER PRIMARY KEY,
+    requested_by INTEGER NOT NULL REFERENCES users(id),
+    assigned_to INTEGER NOT NULL REFERENCES users(id),
+    case_ids TEXT NOT NULL,                -- JSON list of case IDs
+    llm_ids TEXT NOT NULL,                 -- JSON list; the runner resolves
+                                           -- model names from ITS settings
+    note TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open'
+        CHECK (status IN ('open', 'done', 'failed', 'cancelled')),
+    status_note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS answers (
+    id INTEGER PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    run_job_id INTEGER REFERENCES run_jobs(id),
+    run_by INTEGER NOT NULL REFERENCES users(id),
+    llm_id TEXT NOT NULL,
+    model_name TEXT NOT NULL DEFAULT '',
+    variant_id TEXT NOT NULL,              -- llm@model-name scored identity
+    model_display_name TEXT NOT NULL DEFAULT '',
+    response_text TEXT NOT NULL DEFAULT '',
+    answer_html_path TEXT,
+    image_paths TEXT NOT NULL DEFAULT '[]',
+    thinking_setting TEXT NOT NULL DEFAULT '',
+    model_reported TEXT NOT NULL DEFAULT '',
+    deep_thinking INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'ok',
+    error TEXT,
+    case_text_sha256 TEXT NOT NULL DEFAULT '',
+    rubric_version_at_run INTEGER NOT NULL DEFAULT 1,
+    run_by_owner INTEGER NOT NULL DEFAULT 0,  -- blinding honesty flag
+    self_id_warning TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    UNIQUE (case_id, variant_id, run_by)
+);
+"""
+
+# Future additive changes: append ("0003", "ALTER TABLE ...") entries.
 MIGRATIONS = [
     ("0001", SCHEMA),
+    ("0002", SCHEMA_0002),
 ]
 
 

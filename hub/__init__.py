@@ -40,10 +40,12 @@ def create_app(instance_dir=None, secret_key=None):
 
     hub_db.init_app(app)
 
-    from . import auth, cases
+    from . import auth, cases, runner_api, runs
 
     app.register_blueprint(auth.bp)
     app.register_blueprint(cases.bp)
+    app.register_blueprint(runs.bp)
+    app.register_blueprint(runner_api.bp)
 
     @app.route("/")
     def index():

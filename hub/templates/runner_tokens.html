@@ -1,0 +1,38 @@
+{% extends "layout.html" %}
+{% block title %}Runner tokens{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Runner tokens</h1>
+  <p class="hint">The local Runner program signs into the hub with a token
+  instead of your password. Create one per computer; paste it into the
+  Runner's Settings (Hub section). Your API keys and site logins never
+  leave your computer.</p>
+  {% if new_token %}
+    <div class="flash">Your new token - copy it NOW, it is only shown once:
+      <br><code>{{ new_token }}</code></div>
+  {% endif %}
+  {% if tokens %}
+  <table>
+    <tr><th>Label</th><th>Created</th><th>Last used</th><th></th></tr>
+    {% for token in tokens %}
+    <tr>
+      <td>{{ token['label'] }}</td>
+      <td>{{ token['created_at'][:16].replace('T', ' ') }}</td>
+      <td>{{ (token['last_seen'] or 'never')[:16].replace('T', ' ') }}</td>
+      <td>
+        <form method="post" style="display:inline">
+          <input type="hidden" name="revoke" value="{{ token['id'] }}">
+          <button class="btn secondary" type="submit">Revoke</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+  <form method="post">
+    <label for="label">Label for a new token (e.g. "office PC")</label>
+    <input type="text" id="label" name="label">
+    <p><button class="btn" type="submit">Create a token</button></p>
+  </form>
+</div>
+{% endblock %}
