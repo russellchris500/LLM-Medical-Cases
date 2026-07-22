@@ -185,6 +185,32 @@ class LegacyImportTests(unittest.TestCase):
         self.legacy.cleanup()
         self.tmp.cleanup()
 
+    def test_grades_found_next_to_the_zip_in_scoring_packages(self):
+        # The legacy scorer saves scores_<package>.json NEXT TO THE ZIP it
+        # graded - for a PI scoring their own packages that is
+        # scoring_packages/, one level below the study root. The importer
+        # must find it there.
+        import shutil
+
+        for name in os.listdir(self.legacy.name):
+            if name.startswith("scores_") and name.endswith(".json"):
+                shutil.move(
+                    os.path.join(self.legacy.name, name),
+                    os.path.join(self.legacy.name, "scoring_packages", name),
+                )
+        report = import_legacy(self.app, "a@example.org", self.legacy.name)
+        self.assertEqual(report["grades"], 2)
+        self.assertEqual(report["skipped"], [])
+
+    def test_missing_scores_files_are_reported_not_silent(self):
+        for name in list(os.listdir(self.legacy.name)):
+            if name.startswith("scores_"):
+                os.unlink(os.path.join(self.legacy.name, name))
+        report = import_legacy(self.app, "a@example.org", self.legacy.name)
+        self.assertEqual(report["grades"], 0)
+        self.assertTrue(any("No scores_*.json" in line
+                            for line in report["skipped"]))
+
     def test_import_into_pi_as_grader_account(self):
         # The PI's own account works as the import target: with a grader
         # number already, or without one (it is granted on the spot).

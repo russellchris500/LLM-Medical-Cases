@@ -117,24 +117,53 @@ def import_legacy(app, grader_email, folder="."):
                 )
                 report["answers"] += 1
 
-        # Grades: scores files joined through the package key files.
+        # Grades: scores files joined through the package key files. The
+        # legacy scorer saves scores_<package>.json NEXT TO THE ZIP it
+        # graded - often in scoring_packages/ or a copy of it - so search
+        # the study folder root AND every first-level subfolder for both.
+        search_dirs = [folder] + sorted(
+            entry.path for entry in os.scandir(folder) if entry.is_dir()
+        )
         keys = {}
-        for key_path in glob.glob(
-            os.path.join(folder, "scoring_packages", "*_KEY_DO_NOT_SEND.json")
-        ):
-            with open(key_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if data.get("package_id"):
-                keys[data["package_id"]] = data.get("key", {})
-        for scores_path in glob.glob(os.path.join(folder, "scores_*.json")):
+        for directory in search_dirs:
+            for key_path in glob.glob(
+                os.path.join(directory, "*_KEY_DO_NOT_SEND.json")
+            ):
+                with open(key_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if data.get("package_id"):
+                    keys[data["package_id"]] = data.get("key", {})
+        scores_paths = []
+        seen_paths = set()
+        for directory in search_dirs:
+            for path in sorted(glob.glob(os.path.join(directory, "scores_*.json"))):
+                real = os.path.realpath(path)
+                if real not in seen_paths:
+                    seen_paths.add(real)
+                    scores_paths.append(path)
+        if not scores_paths:
+            report["skipped"].append(
+                "No scores_*.json files were found in {} or its subfolders - "
+                "if you graded answers, copy the scores file(s) the scorer "
+                "program saved (next to the zip it graded) into this folder "
+                "and re-run the import; re-running is safe.".format(
+                    os.path.abspath(folder)
+                )
+            )
+        for scores_path in scores_paths:
             with open(scores_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             key = keys.get(data.get("package_id"))
             if key is None:
                 report["skipped"].append(
-                    "{}: no matching key file".format(os.path.basename(scores_path))
+                    "{}: no matching *_KEY_DO_NOT_SEND.json was found for its "
+                    "package - its grades were left out".format(
+                        os.path.basename(scores_path)
+                    )
                 )
                 continue
+            imported_here = 0
+            missing_answers = 0
             for record in data.get("scores", []):
                 entry = (key.get(record["case_id"]) or {}).get(record["label"])
                 if entry is None:
@@ -145,6 +174,7 @@ def import_legacy(app, grader_email, folder="."):
                     (record["case_id"], entry["model_id"], grader["id"]),
                 ).fetchone()
                 if answer is None:
+                    missing_answers += 1
                     continue
                 db.execute(
                     "INSERT OR IGNORE INTO grading_assignments "
@@ -174,6 +204,15 @@ def import_legacy(app, grader_email, folder="."):
                      record.get("comment", ""), record.get("rubric_version", 1)),
                 )
                 report["grades"] += 1
+                imported_here += 1
+            note = "{}: {} grade(s) imported".format(
+                os.path.basename(scores_path), imported_here
+            )
+            if missing_answers:
+                note += (", {} skipped (no matching imported answer - was "
+                         "answers.json imported from the same study?)"
+                         .format(missing_answers))
+            report.setdefault("details", []).append(note)
         db.commit()
         return report
     finally:
@@ -250,8 +289,10 @@ def main(argv=None):
         print("Imported {} case(s), {} answer(s), {} grade(s).".format(
             report["cases"], report["answers"], report["grades"]
         ))
+        for line in report.get("details", []):
+            print("  " + line)
         for line in report["skipped"]:
-            print("Skipped: " + line)
+            print("Note: " + line)
         return 0
 
     if command == "run":
