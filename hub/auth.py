@@ -18,9 +18,16 @@ from .db import get_db
 bp = Blueprint("auth", __name__)
 
 
+def is_grader(user):
+    """Anyone holding a grader number authors, runs, and grades - the PI
+    included, once they opt in (roles are hats, not walls)."""
+    return user is not None and user["grader_number"] is not None
+
+
 @bp.app_context_processor
 def inject_user():
-    return {"user": g.get("user")}
+    user = g.get("user")
+    return {"user": user, "user_is_grader": is_grader(user)}
 
 
 @bp.before_app_request
@@ -54,14 +61,31 @@ def pi_required(view):
     return wrapped
 
 
+def next_grader_number(db):
+    row = db.execute(
+        "SELECT COALESCE(MAX(grader_number), 0) + 1 AS n FROM users"
+    ).fetchone()
+    return row["n"]
+
+
+def grant_grader_number(db, user_id):
+    """Give a user (typically the PI) a grader number so they can author,
+    run, and grade cases too. No-op if they already have one."""
+    db.execute(
+        "UPDATE users SET grader_number = ? WHERE id = ? AND grader_number IS NULL",
+        (next_grader_number(db), user_id),
+    )
+    db.commit()
+    return db.execute(
+        "SELECT grader_number FROM users WHERE id = ?", (user_id,)
+    ).fetchone()["grader_number"]
+
+
 def create_user(db, name, email, role, invited=True):
     """Insert a user; graders get the next free grader number."""
     grader_number = None
     if role == "grader":
-        row = db.execute(
-            "SELECT COALESCE(MAX(grader_number), 0) + 1 AS n FROM users"
-        ).fetchone()
-        grader_number = row["n"]
+        grader_number = next_grader_number(db)
     token = secrets.token_urlsafe(24) if invited else None
     cursor = db.execute(
         "INSERT INTO users (name, email, role, grader_number, invite_token) "

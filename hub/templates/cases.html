@@ -3,8 +3,11 @@
 {% block content %}
 <div class="card">
   <h1>{{ 'All cases in the study' if user['role'] == 'pi' else 'My cases' }}</h1>
-  {% if user['role'] == 'grader' %}
-    <p><a class="btn" href="{{ url_for('cases.new_case') }}">New case</a></p>
+  {% if user_is_grader or user['role'] == 'pi' %}
+    <p><a class="btn" href="{{ url_for('cases.new_case') }}">New case</a>
+    {% if user['role'] == 'pi' and not user_is_grader %}
+      <span class="hint">(your first case also makes you a grader)</span>
+    {% endif %}</p>
   {% endif %}
   {% if cases %}
   <table>
@@ -21,7 +24,7 @@
       <td>{{ case['rubric_version'] }}</td>
       <td>{{ case['case_text'][:110] }}{% if case['case_text']|length > 110 %}...{% endif %}</td>
       <td>
-        {% if user['role'] == 'grader' %}
+        {% if case['owner_id'] == user['id'] %}
         <form method="post" style="display:inline"
               action="{{ url_for('cases.delete_case', case_id=case['id']) }}"
               onsubmit="return confirm('Really delete case {{ case['id'] }}?');">

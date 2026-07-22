@@ -25,7 +25,7 @@ from flask import (
 from case_editor import now_iso
 from eval_common import markdown_to_html
 from score_answers import compute_score
-from .auth import login_required, pi_required
+from .auth import is_grader, login_required, pi_required
 from .db import get_db
 
 bp = Blueprint("grading", __name__)
@@ -119,7 +119,8 @@ def active_grade(db, assignment_id, answer_id):
 @bp.route("/grade")
 @login_required
 def queue():
-    if g.user["role"] != "grader":
+    if not is_grader(g.user):
+        # A PI who has not opted into grading yet.
         return redirect(url_for("grading.assignments_page"))
     db = get_db()
     ensure_own_assignments(db, g.user["id"])
@@ -372,7 +373,8 @@ def assignments_page():
         grader_id = request.form.get("grader_id")
         case_ids = request.form.getlist("case_id")
         grader = db.execute(
-            "SELECT * FROM users WHERE id = ? AND role = 'grader'", (grader_id,)
+            "SELECT * FROM users WHERE id = ? AND grader_number IS NOT NULL",
+            (grader_id,),
         ).fetchone()
         if grader is None or not case_ids:
             error = "Pick a grader and at least one case."
@@ -397,7 +399,7 @@ def assignments_page():
             ))
             return redirect(url_for("grading.assignments_page"))
     graders = db.execute(
-        "SELECT * FROM users WHERE role = 'grader' AND disabled = 0 "
+        "SELECT * FROM users WHERE grader_number IS NOT NULL AND disabled = 0 "
         "ORDER BY name COLLATE NOCASE"
     ).fetchall()
     cases = db.execute(

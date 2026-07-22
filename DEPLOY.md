@@ -168,6 +168,15 @@ cd /srv/LLM-Medical-Cases && git pull && systemctl restart studyhub
   but OS updates, firewall, and backups are your responsibility (the
   steps above automate almost all of it).
 
+## The PI can be a grader too
+
+One account, both hats: the first time the PI clicks **New case** they
+are also given a grader number (or run
+`python -m hub.manage make-grader pi@example.org`). From then on the PI
+authors, runs, and grades their own cases exactly like any grader -
+blinded the same way - while keeping all the PI pages (Rankings,
+Cross-grading, People, the run queue).
+
 ## Connecting the Runners
 
 Each person who runs LLMs (the PI, and any grader with their own API

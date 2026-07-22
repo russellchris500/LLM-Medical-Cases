@@ -49,7 +49,7 @@
   {% if user %}
     <a href="{{ url_for('cases.my_cases') }}">Cases</a>
     <a href="{{ url_for('runs.run_jobs') }}">Run jobs</a>
-    {% if user['role'] == 'grader' %}
+    {% if user_is_grader %}
       <a href="{{ url_for('grading.queue') }}">Grade</a>
       <a href="{{ url_for('rankings.my_results') }}">My results</a>
     {% endif %}

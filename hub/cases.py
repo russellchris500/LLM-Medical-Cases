@@ -18,7 +18,7 @@ from flask import (
 
 from case_editor import now_iso
 from score_answers import compute_score, grade_survives_removal
-from .auth import login_required
+from .auth import grant_grader_number, is_grader, login_required
 from .db import get_db
 
 bp = Blueprint("cases", __name__)
@@ -199,8 +199,20 @@ def my_cases():
 @bp.route("/cases/new", methods=("GET", "POST"))
 @login_required
 def new_case():
-    if g.user["role"] != "grader":
-        return ("Only graders author cases (the PI coordinates).", 403)
+    if not is_grader(g.user):
+        if g.user["role"] != "pi":
+            return ("Only graders author cases.", 403)
+        # The PI wears the grader hat too - opt in on first use.
+        db = get_db()
+        number = grant_grader_number(db, g.user["id"])
+        g.user = db.execute(
+            "SELECT * FROM users WHERE id = ?", (g.user["id"],)
+        ).fetchone()
+        flash(
+            "You are now also grader {} - your cases will get IDs like "
+            "G{:03d}-001, and the Grade and My results pages are open to "
+            "you.".format(number, number)
+        )
     error = None
     if request.method == "POST":
         case_text, rubric, error = clean_case_input(
@@ -259,7 +271,8 @@ def edit_case(case_id):
 @login_required
 def delete_case(case_id):
     db = get_db()
-    row = load_case(db, case_id, g.user["id"] if g.user["role"] == "grader" else None)
+    # Only a case's owner may delete it - including a PI, only for their own.
+    row = load_case(db, case_id, g.user["id"])
     if row is None:
         abort(404)
     db.execute("UPDATE cases SET deleted = 1, updated_at = ? WHERE id = ?",

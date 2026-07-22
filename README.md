@@ -18,7 +18,9 @@ The framework consists of six programs, run in sequence:
 > rubric flags and fixes propagate instantly with targeted re-grading; the
 > **PI** fulfills run requests with their Runner and gets a live Elo
 > ranking dashboard (with inter-rater agreement) plus CSV export and
-> snapshots. LLMs are still executed by the local **Hub Runner** program
+> snapshots. The PI can wear both hats: their first **New case** click
+> also makes them a grader, with the same blinding as everyone else.
+> LLMs are still executed by the local **Hub Runner** program
 > (`Run Hub Jobs.pyw`) because the browser-site models need a real browser
 > and personal logins; API keys and site credentials never leave the
 > runner's computer. `python -m hub.manage import-legacy` moves an

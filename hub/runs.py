@@ -16,7 +16,7 @@ from flask import (
 from case_editor import now_iso
 from llm_api import API_REGISTRY
 from llm_browser import SITE_INFO
-from .auth import login_required
+from .auth import is_grader, login_required
 from .db import get_db
 
 bp = Blueprint("runs", __name__)
@@ -54,7 +54,7 @@ def run_jobs():
     db = get_db()
     error = None
     if request.method == "POST":
-        if g.user["role"] != "grader":
+        if not is_grader(g.user):
             abort(403)
         case_ids = request.form.getlist("case_id")
         llm_ids = request.form.getlist("llm_id")
@@ -118,7 +118,7 @@ def run_jobs():
         job_rows.append(entry)
 
     my_cases = []
-    if g.user["role"] == "grader":
+    if is_grader(g.user):
         my_cases = db.execute(
             "SELECT id, case_text FROM cases WHERE owner_id = ? AND deleted = 0 "
             "ORDER BY case_number",

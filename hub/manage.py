@@ -3,7 +3,12 @@
     python -m hub.manage init-db
     python -m hub.manage create-pi "Dr Name" pi@example.org
     python -m hub.manage import-legacy grader@example.org [folder]
+    python -m hub.manage make-grader email@example.org
     python -m hub.manage run           (development server on port 5000)
+
+make-grader gives an account (typically the PI's) a grader number so it
+can author, run, and grade cases too - the same thing that happens
+automatically the first time the PI clicks New case.
 
 import-legacy moves an existing desktop-programs study into the hub:
 cases from master_cases.json, collected answers (with their image
@@ -201,6 +206,28 @@ def main(argv=None):
         finally:
             db.close()
         print("PI account created for {} <{}>.".format(name, email))
+        return 0
+
+    if command == "make-grader":
+        if len(argv) != 2:
+            print("Usage: python -m hub.manage make-grader email@example.org")
+            return 1
+        from .auth import grant_grader_number
+
+        db = connect(app.config["DATABASE"])
+        try:
+            user = db.execute(
+                "SELECT * FROM users WHERE email = ?", (argv[1],)
+            ).fetchone()
+            if user is None:
+                print("No account with that email.")
+                return 1
+            number = grant_grader_number(db, user["id"])
+        finally:
+            db.close()
+        print("{} is grader {} (case IDs G{:03d}-...).".format(
+            user["name"], number, number
+        ))
         return 0
 
     if command == "import-legacy":

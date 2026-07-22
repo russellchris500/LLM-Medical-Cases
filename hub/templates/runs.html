@@ -34,7 +34,7 @@
   {% else %}<p>No run jobs yet.</p>{% endif %}
 </div>
 
-{% if user['role'] == 'grader' %}
+{% if user_is_grader %}
 <div class="card">
   <h1>New run job</h1>
   {% if my_cases %}
