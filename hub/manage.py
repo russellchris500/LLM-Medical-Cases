@@ -35,17 +35,27 @@ from .db import connect
 def import_legacy(app, grader_email, folder="."):
     """Returns a report dict; raises SystemExit with a message on setup
     problems (unknown grader, missing master file)."""
+    from .auth import grant_grader_number
+
     db = connect(app.config["DATABASE"])
     try:
         grader = db.execute(
-            "SELECT * FROM users WHERE email = ? AND role = 'grader'",
-            (grader_email,),
+            "SELECT * FROM users WHERE email = ?", (grader_email,)
         ).fetchone()
         if grader is None:
             raise SystemExit(
-                "No grader account with email {} - invite them on the People "
-                "page first.".format(grader_email)
+                "No account with email {} - create it first (create-pi, or an "
+                "invite on the People page).".format(grader_email)
             )
+        if grader["grader_number"] is None:
+            # A PI who has not opted into grading yet: the import makes
+            # them a grader, same as their first New case click would.
+            number = grant_grader_number(db, grader["id"])
+            print("{} is now also grader {} (the imported cases need a "
+                  "grader owner).".format(grader["name"], number))
+            grader = db.execute(
+                "SELECT * FROM users WHERE id = ?", (grader["id"],)
+            ).fetchone()
         master_path = os.path.join(folder, "master_cases.json")
         if not os.path.exists(master_path):
             raise SystemExit("No master_cases.json in {}.".format(folder))

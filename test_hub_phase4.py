@@ -185,6 +185,29 @@ class LegacyImportTests(unittest.TestCase):
         self.legacy.cleanup()
         self.tmp.cleanup()
 
+    def test_import_into_pi_as_grader_account(self):
+        # The PI's own account works as the import target: with a grader
+        # number already, or without one (it is granted on the spot).
+        report = import_legacy(self.app, "pi@example.org", self.legacy.name)
+        self.assertEqual(report["cases"], 2)
+        db = connect(self.app.config["DATABASE"])
+        pi = db.execute(
+            "SELECT * FROM users WHERE email = 'pi@example.org'"
+        ).fetchone()
+        case = db.execute("SELECT * FROM cases WHERE id = '003-001'").fetchone()
+        db.close()
+        self.assertIsNotNone(pi["grader_number"])  # granted by the import
+        self.assertEqual(pi["role"], "pi")         # still the PI
+        self.assertEqual(case["owner_id"], pi["id"])
+        # Re-import into the same (now grader-numbered) account still works.
+        report = import_legacy(self.app, "pi@example.org", self.legacy.name)
+        self.assertEqual(report["grades"], 0)  # idempotent
+
+    def test_import_unknown_email_is_a_clear_error(self):
+        with self.assertRaises(SystemExit) as ctx:
+            import_legacy(self.app, "nobody@example.org", self.legacy.name)
+        self.assertIn("No account with email", str(ctx.exception))
+
     def test_import_brings_cases_answers_images_and_grades(self):
         report = import_legacy(self.app, "a@example.org", self.legacy.name)
         self.assertEqual(report["cases"], 2)
