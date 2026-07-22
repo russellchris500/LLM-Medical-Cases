@@ -23,6 +23,15 @@
   {% endif %}
   <div style="border:1px solid var(--line); border-radius:6px; padding:4px 14px;
               background:#fcfcfd">{{ answer_body | safe }}</div>
+  <form method="post" style="margin-top:10px"
+        action="{{ url_for('grading.discard_answer', case_id=case['id'],
+                           label=answer['label']) }}"
+        onsubmit="return confirm('Discard answer {{ answer['label'] }}? It is removed from grading and must be re-run.');">
+    <input type="text" name="reason" style="width:40%"
+           placeholder="Why? (e.g. answer cut off mid-sentence)">
+    <button class="btn secondary" type="submit">Discard this answer
+      (incomplete / badly captured)</button>
+  </form>
 </div>
 <div class="card">
   <h1>Your grading</h1>

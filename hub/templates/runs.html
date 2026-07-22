@@ -34,6 +34,27 @@
   {% else %}<p>No run jobs yet.</p>{% endif %}
 </div>
 
+{% if discarded %}
+<div class="card">
+  <h1>Discarded during grading - needs a re-run</h1>
+  <p class="hint">These answers were judged incomplete (usually a bad
+  browser capture) and removed. Create a run job below for the case with
+  that LLM; the fresh answer replaces the old one under the same letter
+  and comes back for grading.</p>
+  <table>
+    <tr><th>Case</th><th>Model</th><th>Reason</th><th>Discarded by</th></tr>
+    {% for row in discarded %}
+    <tr>
+      <td>{{ row['case_id'] }}</td>
+      <td>{{ row['model_display_name'] or row['variant_id'] }}</td>
+      <td>{{ row['discarded_reason'] }}</td>
+      <td>{{ row['discarder'] or '?' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
 {% if user_is_grader %}
 <div class="card">
   <h1>New run job</h1>

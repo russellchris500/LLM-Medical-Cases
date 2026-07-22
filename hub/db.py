@@ -155,12 +155,18 @@ CREATE TABLE IF NOT EXISTS ranking_snapshots (
 );
 """
 
-# Future additive changes: append ("0005", "ALTER TABLE ...") entries.
+SCHEMA_0005 = """
+ALTER TABLE answers ADD COLUMN discarded_by INTEGER REFERENCES users(id);
+ALTER TABLE answers ADD COLUMN discarded_reason TEXT NOT NULL DEFAULT '';
+"""
+
+# Future additive changes: append ("0006", "ALTER TABLE ...") entries.
 MIGRATIONS = [
     ("0001", SCHEMA),
     ("0002", SCHEMA_0002),
     ("0003", SCHEMA_0003),
     ("0004", SCHEMA_0004),
+    ("0005", SCHEMA_0005),
 ]
 
 

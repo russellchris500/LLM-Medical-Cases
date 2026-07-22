@@ -117,6 +117,24 @@ def run_jobs():
         entry["llm_list"] = ", ".join(json.loads(job["llm_ids"]))
         job_rows.append(entry)
 
+    # Answers discarded during grading (incomplete captures) that need a
+    # fresh run: the case owner sees their own; the PI sees all.
+    if g.user["role"] == "pi":
+        discarded = db.execute(
+            "SELECT answers.*, users.name AS discarder FROM answers "
+            "LEFT JOIN users ON users.id = answers.discarded_by "
+            "WHERE answers.status = 'discarded' ORDER BY answers.case_id"
+        ).fetchall()
+    else:
+        discarded = db.execute(
+            "SELECT answers.*, users.name AS discarder FROM answers "
+            "LEFT JOIN users ON users.id = answers.discarded_by "
+            "JOIN cases ON cases.id = answers.case_id "
+            "WHERE answers.status = 'discarded' AND cases.owner_id = ? "
+            "ORDER BY answers.case_id",
+            (g.user["id"],),
+        ).fetchall()
+
     my_cases = []
     if is_grader(g.user):
         my_cases = db.execute(
@@ -126,7 +144,7 @@ def run_jobs():
         ).fetchall()
     return render_template(
         "runs.html", jobs=job_rows, my_cases=my_cases,
-        llm_choices=llm_choices(), error=error,
+        llm_choices=llm_choices(), discarded=discarded, error=error,
     )
 
 

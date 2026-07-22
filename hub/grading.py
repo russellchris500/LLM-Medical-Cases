@@ -92,7 +92,8 @@ def ensure_blind_labels(db, assignment):
     return db.execute(
         "SELECT blind_labels.label, answers.* FROM blind_labels "
         "JOIN answers ON answers.id = blind_labels.answer_id "
-        "WHERE assignment_id = ? ORDER BY blind_labels.label",
+        "WHERE assignment_id = ? AND answers.status IN ('ok', 'ok_manual') "
+        "ORDER BY blind_labels.label",
         (assignment["id"],),
     ).fetchall()
 
@@ -179,7 +180,8 @@ def answer_page(case_id, label):
     answer = db.execute(
         "SELECT blind_labels.label, answers.* FROM blind_labels "
         "JOIN answers ON answers.id = blind_labels.answer_id "
-        "WHERE assignment_id = ? AND label = ?",
+        "WHERE assignment_id = ? AND label = ? "
+        "AND answers.status IN ('ok', 'ok_manual')",
         (assignment["id"], label.upper()),
     ).fetchone()
     if answer is None:
@@ -272,7 +274,8 @@ def answer_image(case_id, label, index):
     answer = db.execute(
         "SELECT answers.* FROM blind_labels "
         "JOIN answers ON answers.id = blind_labels.answer_id "
-        "WHERE assignment_id = ? AND label = ?",
+        "WHERE assignment_id = ? AND label = ? "
+        "AND answers.status IN ('ok', 'ok_manual')",
         (assignment["id"], label.upper()),
     ).fetchone()
     if answer is None:
@@ -288,6 +291,49 @@ def answer_image(case_id, label, index):
     return send_file(full, download_name="{}_{}_{}{}".format(
         case_id, label.upper(), index + 1, extension
     ))
+
+
+@bp.route("/grade/<case_id>/<label>/discard", methods=("POST",))
+@login_required
+def discard_answer(case_id, label):
+    """An incomplete / badly captured answer is taken out of the study:
+    it disappears from every grader's pages, all grades on it are set
+    aside, and the case owner sees it on the Run jobs page for a re-run.
+    A fresh run of the same case and model replaces it in place."""
+    db = get_db()
+    assignment = my_assignment(db, case_id)
+    if assignment is None:
+        abort(404)
+    answer = db.execute(
+        "SELECT answers.* FROM blind_labels "
+        "JOIN answers ON answers.id = blind_labels.answer_id "
+        "WHERE assignment_id = ? AND label = ? "
+        "AND answers.status IN ('ok', 'ok_manual')",
+        (assignment["id"], label.upper()),
+    ).fetchone()
+    if answer is None:
+        abort(404)
+    reason = request.form.get("reason", "").strip() or "incomplete capture"
+    db.execute(
+        "UPDATE answers SET status = 'discarded', discarded_by = ?, "
+        "discarded_reason = ? WHERE id = ?",
+        (g.user["id"], reason, answer["id"]),
+    )
+    superseded = db.execute(
+        "UPDATE grades SET superseded = 1, "
+        "superseded_reason = 'answer discarded as incomplete', updated_at = ? "
+        "WHERE answer_id = ? AND superseded = 0",
+        (now_iso(), answer["id"]),
+    ).rowcount
+    db.commit()
+    message = ("Answer {} of case {} was discarded ({}). Re-run that case "
+               "on the Run jobs page - the fresh answer will take the same "
+               "letter and come back for grading.".format(
+                   label.upper(), case_id, reason))
+    if superseded:
+        message += " {} existing grade(s) on it were set aside.".format(superseded)
+    flash(message)
+    return redirect(url_for("grading.case_page", case_id=case_id))
 
 
 @bp.route("/grade/<case_id>/flag", methods=("POST",))

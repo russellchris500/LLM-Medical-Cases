@@ -42,7 +42,8 @@ def build_hub_matches(db):
         "JOIN users ON users.id = ga.grader_id "
         "JOIN answers ON answers.id = grades.answer_id "
         "JOIN cases ON cases.id = answers.case_id "
-        "WHERE grades.superseded = 0 AND cases.deleted = 0"
+        "WHERE grades.superseded = 0 AND cases.deleted = 0 "
+        "AND answers.status IN ('ok', 'ok_manual')"
     ).fetchall()
     matches = []
     excluded = []

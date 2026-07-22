@@ -205,7 +205,9 @@ def upload_answer():
         "rubric_version_at_run = excluded.rubric_version_at_run, "
         "run_by_owner = excluded.run_by_owner, "
         "self_id_warning = excluded.self_id_warning, "
-        "created_at = excluded.created_at",
+        "created_at = excluded.created_at, "
+        # A fresh run replaces (and revives) a discarded answer.
+        "discarded_by = NULL, discarded_reason = ''",
         (
             case["id"], job["id"], g.runner_user_id,
             form.get("llm_id", ""), form.get("model_name", ""), variant_id,
