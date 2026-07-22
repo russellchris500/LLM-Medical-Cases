@@ -2,6 +2,9 @@
 {% block title %}{{ case['id'] }} answer {{ answer['label'] }}{% endblock %}
 {% block content %}
 <style>
+  /* Grading gets a wider canvas than the other pages: both panels are
+     75% wider (960px -> 1680px overall) on screens with the room. */
+  main { max-width: 1680px; }
   /* Wide screens: the answer scrolls on the left while the grading panel
      (rubric) stays on screen on the right. Narrow screens: one column
      with the RUBRIC FIRST, then the answer. */
