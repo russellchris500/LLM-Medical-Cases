@@ -118,6 +118,16 @@ class GradingTests(unittest.TestCase):
                 self.assertNotIn(forbidden, text.lower().replace(
                     "answer from claude", "").replace("answer from gpt", ""))
 
+    def test_answer_page_keeps_the_sticky_rubric_panel(self):
+        # The rubric lives in a side panel that stays on screen while the
+        # answer scrolls (and stacks ABOVE the answer on narrow screens).
+        self.open_queue()
+        page = self.client.get("/grade/G001-001/A")
+        text = page.get_data(as_text=True)
+        self.assertIn('id="gradepanel"', text)
+        self.assertIn("position: sticky", text)
+        self.assertLess(text.index('id="gradepanel"'), len(text))
+
     def test_other_graders_cannot_open_the_case(self):
         self.open_queue()
         self.login("b@example.org", "bob-pass")

@@ -1,7 +1,25 @@
 {% extends "layout.html" %}
 {% block title %}{{ case['id'] }} answer {{ answer['label'] }}{% endblock %}
 {% block content %}
-<div class="card">
+<style>
+  /* Wide screens: the answer scrolls on the left while the grading panel
+     (rubric) stays on screen on the right. Narrow screens: one column
+     with the RUBRIC FIRST, then the answer. */
+  .gradegrid { display: grid; grid-template-columns: 1fr; gap: 16px;
+               align-items: start; }
+  #answercol { order: 2; min-width: 0; }
+  #gradepanel { order: 1; }
+  @media (min-width: 980px) {
+    .gradegrid { grid-template-columns: 58fr 42fr; }
+    #answercol { order: 1; }
+    #gradepanel { order: 2; position: sticky; top: 12px;
+                  max-height: calc(100vh - 24px); overflow-y: auto; }
+  }
+  #gradepanel p { margin: 8px 0; }
+</style>
+<div class="gradegrid">
+<div id="answercol">
+<div class="card" style="margin-bottom:16px">
   <h1>Case {{ case['id'] }} - answer {{ answer['label'] }}</h1>
   <p class="hint">
     {% if run_blind %}This answer was run by someone else - you are grading
@@ -33,6 +51,8 @@
       (incomplete / badly captured)</button>
   </form>
 </div>
+</div>
+<div id="gradepanel">
 <div class="card">
   <h1>Your grading</h1>
   <form method="post" id="gradeform">
@@ -78,6 +98,8 @@
        <a class="btn secondary"
           href="{{ url_for('grading.case_page', case_id=case['id']) }}">Back</a></p>
   </form>
+</div>
+</div>
 </div>
 <script>
 (function () {
