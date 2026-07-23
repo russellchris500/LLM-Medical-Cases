@@ -179,29 +179,45 @@ class GradingTests(unittest.TestCase):
             "case_text": "Chest pain.", "rubric": "\n".join(new_items),
         }, follow_redirects=True)
 
-    def test_removed_item_requeues_only_the_affected_grade(self):
+    def active_grades(self):
+        db = self.db()
+        rows = db.execute(
+            "SELECT grades.*, blind_labels.label FROM grades "
+            "JOIN blind_labels ON blind_labels.answer_id = grades.answer_id "
+            "AND blind_labels.assignment_id = grades.assignment_id "
+            "WHERE grades.superseded = 0 ORDER BY blind_labels.label"
+        ).fetchall()
+        db.close()
+        return rows
+
+    def test_removed_item_keeps_every_other_judgment(self):
         self.open_queue()
-        # A misses ONLY troponin (item 1); B misses aspirin too.
+        # A misses ONLY troponin (item 1); B misses the ECG item.
         self.grade("A", [True, False, True])
         self.grade("B", [False, True, True])
         response = self.edit_rubric(["orders ECG", "gives aspirin"])
-        self.assertIn(b"1 grade(s) affected", response.data)
-        self.assertIn(b"1 grade(s) were carried over", response.data)
-        db = self.db()
-        active = db.execute("SELECT * FROM grades WHERE superseded = 0").fetchall()
-        superseded = db.execute(
-            "SELECT * FROM grades WHERE superseded = 1").fetchall()
-        db.close()
-        self.assertEqual(len(active), 1)
-        self.assertEqual(json.loads(active[0]["rubric_results"]), [False, True])
-        self.assertEqual(active[0]["score"], 0)  # still missed the ECG item
-        self.assertEqual(active[0]["rubric_version"], 2)
-        self.assertEqual(len(superseded), 1)
+        self.assertIn(b"1 grade(s) carried over in full", response.data)
+        self.assertIn(b"1 grade(s) carried over but need finishing",
+                      response.data)
+        active = self.active_grades()
+        self.assertEqual(len(active), 2)
+        by_label = {row["label"]: row for row in active}
+        # A is now all-covered but its risk/approach questions were never
+        # asked - it waits for JUST those (score pending).
+        self.assertEqual(json.loads(by_label["A"]["rubric_results"]),
+                         [True, True])
+        self.assertIsNone(by_label["A"]["score"])
+        # B keeps its judgments minus the deleted item.
+        self.assertEqual(json.loads(by_label["B"]["rubric_results"]),
+                         [False, True])
+        self.assertEqual(by_label["B"]["score"], 0)
+        for row in active:
+            self.assertEqual(row["rubric_version"], 2)
 
     def test_numbered_rubric_deletion_carries_the_score_2_grade(self):
-        # The reported bug: when rubric items carry their own numbers,
-        # deleting one renumbers the rest - that must read as a deletion,
-        # never as a rewording that throws every grade away.
+        # When rubric items carry their own numbers, deleting one
+        # renumbers the rest - that must read as a deletion, never as a
+        # rewording that touches other judgments.
         self.login()
         self.edit_rubric(["1. orders ECG", "2. orders troponin",
                           "3. gives aspirin"])
@@ -209,17 +225,18 @@ class GradingTests(unittest.TestCase):
         self.grade("A", [True, True, True], risk=False, poor=False)  # a 2
         self.grade("B", [True, False, True])  # missed ONLY the doomed item
         response = self.edit_rubric(["1. orders ECG", "2. gives aspirin"])
-        self.assertIn(b"1 grade(s) were carried over", response.data)
-        self.assertIn(b"1 grade(s) affected", response.data)
-        db = self.db()
-        active = db.execute(
-            "SELECT * FROM grades WHERE superseded = 0").fetchall()
-        db.close()
-        self.assertEqual(len(active), 1)
-        self.assertEqual(active[0]["score"], 2)
-        self.assertEqual(json.loads(active[0]["rubric_results"]),
+        self.assertIn(b"1 grade(s) carried over in full", response.data)
+        active = self.active_grades()
+        self.assertEqual(len(active), 2)
+        by_label = {row["label"]: row for row in active}
+        self.assertEqual(by_label["A"]["score"], 2)
+        self.assertEqual(json.loads(by_label["A"]["rubric_results"]),
                          [True, True])
-        self.assertEqual(active[0]["rubric_version"], 3)
+        self.assertEqual(by_label["A"]["rubric_version"], 3)
+        # B is all-covered now; it owes only the risk/approach answers.
+        self.assertIsNone(by_label["B"]["score"])
+        self.assertEqual(json.loads(by_label["B"]["rubric_results"]),
+                         [True, True])
 
     def test_plain_deletion_carries_a_score_2_grade(self):
         self.open_queue()
@@ -248,32 +265,50 @@ class GradingTests(unittest.TestCase):
                          [True, True, False])
         self.assertEqual(active[0]["score"], 0)
 
-    def test_true_rewording_requeues_every_grade(self):
+    def test_rewording_asks_then_reset_blanks_only_that_item(self):
         self.open_queue()
         self.grade("A", [True, True, True], risk=False, poor=False)
+        # First save: the hub asks what to do with judgments on the
+        # changed line - nothing is applied yet.
         response = self.edit_rubric(["orders ECG", "orders troponin and CK",
                                      "gives aspirin"])
-        self.assertIn(b"1 grade(s) affected", response.data)
-        self.assertIn(b"added or reworded", response.data)
+        self.assertIn(b"was changed", response.data)
         db = self.db()
-        active = db.execute(
-            "SELECT COUNT(*) AS n FROM grades WHERE superseded = 0"
-        ).fetchone()["n"]
+        version = db.execute(
+            "SELECT rubric_version FROM cases").fetchone()["rubric_version"]
         db.close()
-        self.assertEqual(active, 0)
+        self.assertEqual(version, 1)
+        # Confirm: reset judgments for that line only.
+        response = self.client.post("/cases/G001-001", data={
+            "case_text": "Chest pain.",
+            "rubric": "orders ECG\norders troponin and CK\ngives aspirin",
+            "changed_1": "reset",
+        }, follow_redirects=True)
+        self.assertIn(b"need finishing", response.data)
+        active = self.active_grades()
+        self.assertEqual(len(active), 1)
+        self.assertEqual(json.loads(active[0]["rubric_results"]),
+                         [True, None, True])
+        self.assertIsNone(active[0]["score"])
+        self.assertEqual(active[0]["rubric_version"], 2)
 
-    def test_added_item_requeues_everything(self):
+    def test_added_item_leaves_other_judgments_in_place(self):
         self.open_queue()
         self.grade("A", [True, True, True], risk=False, poor=False)
         self.grade("B", [True, True, True], risk=False, poor=False)
-        self.edit_rubric(["orders ECG", "orders troponin", "gives aspirin",
-                          "checks renal function"])
-        db = self.db()
-        active = db.execute(
-            "SELECT COUNT(*) AS n FROM grades WHERE superseded = 0"
-        ).fetchone()["n"]
-        db.close()
-        self.assertEqual(active, 0)
+        response = self.edit_rubric(["orders ECG", "orders troponin",
+                                     "gives aspirin", "checks renal function"])
+        # No question needed for a pure addition - grades carry, pending
+        # only the new item.
+        self.assertIn(b"2 grade(s) carried over but need finishing",
+                      response.data)
+        active = self.active_grades()
+        self.assertEqual(len(active), 2)
+        for row in active:
+            self.assertEqual(json.loads(row["rubric_results"]),
+                             [True, True, True, None])
+            self.assertIsNone(row["score"])
+            self.assertEqual(row["rubric_version"], 2)
 
     def test_rubric_ops_diff(self):
         ops = rubric_ops(["a", "b", "c"], ["a", "c"])

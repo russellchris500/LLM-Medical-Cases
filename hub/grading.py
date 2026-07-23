@@ -136,7 +136,10 @@ def queue():
         labeled = ensure_blind_labels(db, assignment)
         graded = 0
         for answer in labeled:
-            if active_grade(db, assignment["id"], answer["id"]) is not None:
+            grade = active_grade(db, assignment["id"], answer["id"])
+            # A pending grade (score NULL after a rubric edit) still
+            # needs the grader, so it does not count as done.
+            if grade is not None and grade["score"] is not None:
                 graded += 1
         queue_rows.append({
             "assignment": assignment,
@@ -151,6 +154,16 @@ def queue():
 def case_page(case_id):
     db = get_db()
     assignment = my_assignment(db, case_id)
+    if assignment is None and is_grader(g.user):
+        # The builder's "Grade this case" shortcut may arrive before the
+        # queue page ever created the owner's assignment - create it now.
+        owned = db.execute(
+            "SELECT 1 FROM cases WHERE id = ? AND owner_id = ? AND deleted = 0",
+            (case_id, g.user["id"]),
+        ).fetchone()
+        if owned is not None:
+            ensure_own_assignments(db, g.user["id"])
+            assignment = my_assignment(db, case_id)
     if assignment is None:
         abort(404)
     case = db.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
@@ -160,12 +173,14 @@ def case_page(case_id):
         grade = active_grade(db, assignment["id"], answer["id"])
         entries.append({
             "label": answer["label"],
-            "graded": grade is not None,
+            "graded": grade is not None and grade["score"] is not None,
+            "pending": grade is not None and grade["score"] is None,
             "score": grade["score"] if grade else None,
         })
     return render_template(
         "grade_case.html", case=case, entries=entries,
         rubric=json.loads(case["rubric"]),
+        can_edit=case["owner_id"] == g.user["id"] or g.user["role"] == "pi",
     )
 
 
@@ -236,9 +251,11 @@ def answer_page(case_id, label):
             flash("Saved: answer {} of case {} scored {}.".format(
                 answer["label"], case_id, score
             ))
-            # Next ungraded answer on this case, if any.
+            # Next answer still needing this grader (ungraded or left
+            # pending by a rubric edit), if any.
             for row in ensure_blind_labels(db, assignment):
-                if active_grade(db, assignment["id"], row["id"]) is None:
+                grade = active_grade(db, assignment["id"], row["id"])
+                if grade is None or grade["score"] is None:
                     return redirect(url_for(
                         "grading.answer_page", case_id=case_id, label=row["label"]
                     ))

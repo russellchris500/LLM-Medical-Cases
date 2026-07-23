@@ -18,7 +18,6 @@ from flask import (
 )
 
 from case_editor import now_iso
-from score_answers import compute_score
 from .auth import grant_grader_number, is_grader, login_required
 from .db import get_db
 
@@ -106,7 +105,7 @@ def rubric_ops(old, new):
     """What happened to each old item, computed by sequence diff over the
     NORMALIZED items (so renumbering reads as 'kept'): kept, reworded
     (position-paired replacement), removed, or brand-new. Recorded in the
-    audit history; grade decisions use match_items instead."""
+    audit history; grade decisions use classify_change instead."""
     old_norm = [normalize_item(item) for item in old]
     new_norm = [normalize_item(item) for item in new]
     ops = {"removed": [], "reworded": [], "added": []}
@@ -124,22 +123,69 @@ def rubric_ops(old, new):
     return ops
 
 
-def invalidate_grades(db, case_id, old_rubric, new_rubric, new_version):
-    """The blast-radius rules, applied instantly to every grader's grades
-    on this case, decided by item CONTENT rather than position - so
-    deletions, renumberings, and reorderings never throw away a grade
-    they do not have to:
+def classify_change(old, new):
+    """What a rubric save did to each line, decided by CONTENT first.
 
-    - every kept item inherits its judgment (results remapped by content,
-      score recomputed);
-    - grades that missed ONLY removed items are set aside for re-grading
-      (their risk/approach questions were never asked);
-    - any genuinely new or reworded item sets every older grade aside -
-      a fresh judgment is needed.
-    Returns (requeued, carried, has_new_content)."""
-    mapping, removed = match_items(old_rubric, new_rubric)
-    has_new_content = any(index is None for index in mapping)
-    requeued = carried = 0
+    Returns (mapping, changed, added, deleted):
+    - mapping[j] = old index whose substance the j-th new item carries
+      (so reorderings and renumberings are 'kept'), None otherwise;
+    - changed = {new_index: old_index} for leftover lines that sit in
+      the same replaced block - a rewording of one item;
+    - added = new lines with no old counterpart at all;
+    - deleted = old lines nothing in the new rubric accounts for."""
+    mapping, removed = match_items(old, new)
+    old_norm = [normalize_item(item) for item in old]
+    new_norm = [normalize_item(item) for item in new]
+    changed = {}
+    matcher = difflib.SequenceMatcher(None, old_norm, new_norm, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag != "replace":
+            continue
+        for step in range(min(i2 - i1, j2 - j1)):
+            old_index, new_index = i1 + step, j1 + step
+            if mapping[new_index] is None and old_index in removed:
+                changed[new_index] = old_index
+    added = [index for index, source in enumerate(mapping)
+             if source is None and index not in changed]
+    deleted = [index for index in removed if index not in changed.values()]
+    return mapping, changed, added, deleted
+
+
+def partial_score(results, risk, poor):
+    """The usual 0/1/2 score, or None while anything it depends on is
+    still unanswered - the mark of a pending grade awaiting its grader."""
+    if any(result is None for result in results):
+        return None
+    if not all(results):
+        return 0
+    if risk is None:
+        return None
+    if risk:
+        return 0
+    if poor is None:
+        return None
+    return 1 if poor else 2
+
+
+def invalidate_grades(db, case_id, old_rubric, new_rubric, new_version,
+                      reset_items=None):
+    """Carry every judgment a rubric edit does not touch, applied
+    instantly to every grader's grades on this case:
+
+    - kept items (including reordered/renumbered ones) keep their
+      judgment;
+    - a deleted item's judgment vanishes with it;
+    - an added item is left unanswered - the grader judges just that;
+    - a changed item keeps its judgment unless the editor chose to
+      reset it (reset_items = new-rubric indexes to re-judge);
+    - the score is recomputed; if anything is now unanswered (a new
+      item, a reset item, or the risk/approach questions that were
+      never asked) the grade stays active with a NULL score until the
+      grader completes it.
+    Returns (complete, pending, superseded) counts."""
+    reset_items = reset_items or set()
+    mapping, changed, _added, _deleted = classify_change(old_rubric, new_rubric)
+    complete = pending = superseded = 0
     rows = db.execute(
         "SELECT grades.* FROM grades JOIN grading_assignments ga "
         "ON ga.id = grades.assignment_id "
@@ -150,48 +196,83 @@ def invalidate_grades(db, case_id, old_rubric, new_rubric, new_version):
         if grade["rubric_version"] >= new_version:
             continue
         results = json.loads(grade["rubric_results"])
-        carry = not has_new_content and len(results) == len(old_rubric)
-        if carry:
-            missed_removed = any(
-                results[index] is False for index in removed
-            )
-            covered_kept = all(results[index] for index in mapping)
-            if missed_removed and covered_kept:
-                # The score would now hinge on the risk/approach
-                # questions that were never asked.
-                carry = False
-        if carry:
-            new_results = [bool(results[index]) for index in mapping]
-            score = compute_score(
-                new_results, grade["unnecessary_risk"], grade["poor_approach"]
-            )
-            db.execute(
-                "UPDATE grades SET rubric_results = ?, score = ?, "
-                "rubric_version = ?, updated_at = ? WHERE id = ?",
-                (json.dumps(new_results), score, new_version, now_iso(),
-                 grade["id"]),
-            )
-            carried += 1
-        else:
+        if len(results) != len(old_rubric):
+            # A grade that predates the recorded rubric - unmappable.
             db.execute(
                 "UPDATE grades SET superseded = 1, superseded_reason = ?, "
                 "updated_at = ? WHERE id = ?",
-                ("rubric changed to version {}".format(new_version), now_iso(),
-                 grade["id"]),
+                ("rubric changed to version {}".format(new_version),
+                 now_iso(), grade["id"]),
             )
-            requeued += 1
-    return requeued, carried, has_new_content
+            superseded += 1
+            continue
+        new_results = []
+        for index in range(len(new_rubric)):
+            source = mapping[index]
+            if source is None and index in changed and index not in reset_items:
+                source = changed[index]
+            if source is None:
+                new_results.append(None)
+            else:
+                value = results[source]
+                new_results.append(None if value is None else bool(value))
+        score = partial_score(new_results, grade["unnecessary_risk"],
+                              grade["poor_approach"])
+        db.execute(
+            "UPDATE grades SET rubric_results = ?, score = ?, "
+            "rubric_version = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(new_results), score, new_version, now_iso(),
+             grade["id"]),
+        )
+        if score is None:
+            pending += 1
+        else:
+            complete += 1
+    return complete, pending, superseded
 
 
-def update_case(db, row, case_text, rubric):
+def discard_all_answers(db, case_id, editor_id):
+    """The case text changed and the editor chose to drop the answers
+    (they answered the OLD question). Same soft-discard as grading's
+    discard button: each answer shows on the Run jobs page as needing a
+    re-run, and a fresh upload revives its slot under the same letter."""
+    rows = db.execute(
+        "SELECT id FROM answers WHERE case_id = ? AND status != 'discarded'",
+        (case_id,),
+    ).fetchall()
+    for row in rows:
+        db.execute(
+            "UPDATE answers SET status = 'discarded', discarded_by = ?, "
+            "discarded_reason = 'case text edited' WHERE id = ?",
+            (editor_id, row["id"]),
+        )
+        db.execute(
+            "UPDATE grades SET superseded = 1, "
+            "superseded_reason = 'answer discarded: case text edited', "
+            "updated_at = ? WHERE answer_id = ? AND superseded = 0",
+            (now_iso(), row["id"]),
+        )
+    return len(rows)
+
+
+def update_case(db, row, case_text, rubric, decisions, editor_id):
     """Apply an edit; rubric content changes bump rubric_version, are
-    recorded in rubric_history, and instantly re-queue exactly the grades
-    the change affects. Returns an info dict for the page's message."""
+    recorded in rubric_history, and instantly remap every grader's
+    grades per the blast-radius rules. decisions carries the editor's
+    confirmed choices: answers_action ('keep'/'delete'/None) for a
+    case-text change with existing answers, and reset_items (set of
+    new-rubric indexes) for changed lines whose judgments are dropped.
+    Returns an info dict for the page's message."""
     old_rubric = json.loads(row["rubric"])
     version = row["rubric_version"]
     history = json.loads(row["rubric_history"])
     info = {"rubric_changed": False, "new_version": version,
-            "requeued": 0, "carried": 0, "new_items": False}
+            "complete": 0, "pending": 0, "superseded": 0,
+            "answers_discarded": 0}
+    if decisions.get("answers_action") == "delete":
+        info["answers_discarded"] = discard_all_answers(
+            db, row["id"], editor_id
+        )
     if rubric != old_rubric:
         ops = rubric_ops(old_rubric, rubric)
         history.append({
@@ -200,10 +281,12 @@ def update_case(db, row, case_text, rubric):
             "old_rubric": old_rubric,
             "new_rubric": list(rubric),
             "ops": ops,
+            "reset_items": sorted(decisions.get("reset_items") or ()),
             "edited_at": now_iso(),
         })
-        info["requeued"], info["carried"], info["new_items"] = (
-            invalidate_grades(db, row["id"], old_rubric, rubric, version + 1)
+        info["complete"], info["pending"], info["superseded"] = (
+            invalidate_grades(db, row["id"], old_rubric, rubric, version + 1,
+                              decisions.get("reset_items"))
         )
         version += 1
         info.update(rubric_changed=True, new_version=version)
@@ -274,6 +357,31 @@ def new_case():
     )
 
 
+def edit_summary(case_id, info):
+    """The flash message after a confirmed edit."""
+    if info["rubric_changed"]:
+        message = ("Saved case {} - the rubric changed, so it is now rubric "
+                   "version {}.".format(case_id, info["new_version"]))
+        if info["complete"]:
+            message += (" {} grade(s) carried over in full."
+                        .format(info["complete"]))
+        if info["pending"]:
+            message += (" {} grade(s) carried over but need finishing - "
+                        "each grader answers only the new or changed item "
+                        "(or the risk/approach questions)."
+                        .format(info["pending"]))
+        if info["superseded"]:
+            message += (" {} grade(s) were set aside for a full re-grade."
+                        .format(info["superseded"]))
+    else:
+        message = "Saved case {}.".format(case_id)
+    if info["answers_discarded"]:
+        message += (" {} answer(s) were discarded because the question "
+                    "changed - re-run them from the Run jobs page."
+                    .format(info["answers_discarded"]))
+    return message
+
+
 @bp.route("/cases/<case_id>", methods=("GET", "POST"))
 @login_required
 def edit_case(case_id):
@@ -284,32 +392,72 @@ def edit_case(case_id):
         abort(404)
     read_only = g.user["role"] == "pi" and row["owner_id"] != g.user["id"]
     error = None
+    confirm_questions = None
+    confirm_hidden = {}
     if request.method == "POST" and not read_only:
         case_text, rubric, error = clean_case_input(
             request.form.get("case_text"), request.form.get("rubric")
         )
         if error is None:
-            info = update_case(db, row, case_text, rubric)
-            if info["rubric_changed"]:
-                message = ("Saved case {} - the rubric changed, so it is now "
-                           "rubric version {}.".format(case_id, info["new_version"]))
-                if info["requeued"]:
-                    message += (" {} grade(s) affected by the change were set "
-                                "aside and will come back for re-grading."
-                                .format(info["requeued"]))
-                    if info["new_items"]:
-                        message += (" (An item was added or reworded, so a "
-                                    "fresh judgment is needed on every "
-                                    "answer.)")
-                if info["carried"]:
-                    message += (" {} grade(s) were carried over unchanged."
-                                .format(info["carried"]))
-                flash(message)
+            old_rubric = json.loads(row["rubric"])
+            text_changed = case_text != row["case_text"]
+            _mapping, changed, _added, _deleted = classify_change(
+                old_rubric, rubric
+            )
+            answers_n = db.execute(
+                "SELECT COUNT(*) AS n FROM answers WHERE case_id = ? "
+                "AND status != 'discarded'", (case_id,)
+            ).fetchone()["n"]
+            grades_n = db.execute(
+                "SELECT COUNT(*) AS n FROM grades JOIN grading_assignments ga "
+                "ON ga.id = grades.assignment_id "
+                "WHERE ga.case_id = ? AND grades.superseded = 0",
+                (case_id,),
+            ).fetchone()["n"]
+            # Decisions the editor must confirm before the save applies.
+            questions = []
+            hidden = {}
+            answers_action = request.form.get("answers_action")
+            ask_answers = text_changed and answers_n > 0
+            if ask_answers:
+                if answers_action in ("keep", "delete"):
+                    hidden["answers_action"] = answers_action
+                else:
+                    questions.append({"kind": "answers", "count": answers_n})
+            reset_items = set()
+            if rubric != old_rubric and grades_n:
+                for new_index in sorted(changed):
+                    choice = request.form.get("changed_{}".format(new_index))
+                    if choice in ("keep", "reset"):
+                        hidden["changed_{}".format(new_index)] = choice
+                        if choice == "reset":
+                            reset_items.add(new_index)
+                    else:
+                        questions.append({
+                            "kind": "changed", "index": new_index,
+                            "old": old_rubric[changed[new_index]],
+                            "new": rubric[new_index],
+                        })
+            if questions:
+                confirm_questions = questions
+                confirm_hidden = hidden
             else:
-                flash("Saved case {}.".format(case_id))
-            return redirect(url_for("cases.my_cases"))
+                decisions = {
+                    "answers_action": answers_action if ask_answers else None,
+                    "reset_items": reset_items,
+                }
+                info = update_case(db, row, case_text, rubric, decisions,
+                                   g.user["id"])
+                flash(edit_summary(case_id, info))
+                return redirect(url_for("cases.my_cases"))
+    has_answers = db.execute(
+        "SELECT COUNT(*) AS n FROM answers WHERE case_id = ? "
+        "AND status IN ('ok', 'ok_manual')", (case_id,)
+    ).fetchone()["n"] > 0
     return render_template(
         "case_edit.html", case=row, error=error, read_only=read_only,
+        confirm_questions=confirm_questions, confirm_hidden=confirm_hidden,
+        has_answers=has_answers,
         form_text=request.form.get("case_text") or row["case_text"],
         form_rubric=request.form.get("rubric")
         or "\n".join(json.loads(row["rubric"])),

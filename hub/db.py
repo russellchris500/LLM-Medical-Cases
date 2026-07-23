@@ -160,13 +160,47 @@ ALTER TABLE answers ADD COLUMN discarded_by INTEGER REFERENCES users(id);
 ALTER TABLE answers ADD COLUMN discarded_reason TEXT NOT NULL DEFAULT '';
 """
 
-# Future additive changes: append ("0006", "ALTER TABLE ...") entries.
+# Partial grades: a rubric edit can leave a grade waiting for just the
+# new/changed item (or just the risk/approach questions), so score must
+# be allowed to be NULL until the grader completes it. SQLite cannot
+# drop NOT NULL in place, so the grades table is rebuilt. Nothing
+# references grades, making the rebuild safe.
+SCHEMA_0006 = """
+CREATE TABLE grades_new (
+    id INTEGER PRIMARY KEY,
+    assignment_id INTEGER NOT NULL REFERENCES grading_assignments(id),
+    answer_id INTEGER NOT NULL REFERENCES answers(id),
+    rubric_results TEXT NOT NULL,          -- JSON list of true/false/null
+    unnecessary_risk INTEGER,              -- NULL = never applied/pending
+    poor_approach INTEGER,                 -- NULL = never applied/pending
+    score INTEGER CHECK (score IN (0, 1, 2)),  -- NULL = awaiting completion
+    comment TEXT NOT NULL DEFAULT '',
+    rubric_version INTEGER NOT NULL,
+    superseded INTEGER NOT NULL DEFAULT 0,
+    superseded_reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+INSERT INTO grades_new (id, assignment_id, answer_id, rubric_results,
+    unnecessary_risk, poor_approach, score, comment, rubric_version,
+    superseded, superseded_reason, created_at, updated_at)
+SELECT id, assignment_id, answer_id, rubric_results, unnecessary_risk,
+    poor_approach, score, comment, rubric_version, superseded,
+    superseded_reason, created_at, updated_at FROM grades;
+DROP TABLE grades;
+ALTER TABLE grades_new RENAME TO grades;
+CREATE UNIQUE INDEX IF NOT EXISTS grades_one_active
+    ON grades (assignment_id, answer_id) WHERE superseded = 0;
+"""
+
+# Future additive changes: append ("0007", "ALTER TABLE ...") entries.
 MIGRATIONS = [
     ("0001", SCHEMA),
     ("0002", SCHEMA_0002),
     ("0003", SCHEMA_0003),
     ("0004", SCHEMA_0004),
     ("0005", SCHEMA_0005),
+    ("0006", SCHEMA_0006),
 ]
 
 

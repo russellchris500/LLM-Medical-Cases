@@ -3,6 +3,11 @@
 {% block content %}
 <div class="card">
   <h1>Case {{ case['id'] }} (rubric version {{ case['rubric_version'] }})</h1>
+  {% if can_edit %}
+    <p><a class="btn secondary"
+          href="{{ url_for('cases.edit_case', case_id=case['id']) }}">
+       Edit this case (builder)</a></p>
+  {% endif %}
   <p style="white-space:pre-wrap">{{ case['case_text'] }}</p>
   <h1 style="font-size:1.05rem">Rubric</h1>
   <ol>
@@ -27,10 +32,10 @@
     {% for entry in entries %}
     <tr>
       <td>{{ entry['label'] }}</td>
-      <td>{% if entry['graded'] %}scored {{ entry['score'] }}{% else %}not graded{% endif %}</td>
+      <td>{% if entry['graded'] %}scored {{ entry['score'] }}{% elif entry['pending'] %}needs completion (rubric changed){% else %}not graded{% endif %}</td>
       <td><a class="btn secondary"
              href="{{ url_for('grading.answer_page', case_id=case['id'], label=entry['label']) }}">
-          {{ 'Re-grade' if entry['graded'] else 'Grade' }}</a></td>
+          {{ 'Re-grade' if entry['graded'] else ('Finish' if entry['pending'] else 'Grade') }}</a></td>
     </tr>
     {% endfor %}
   </table>

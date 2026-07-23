@@ -58,6 +58,16 @@ def build_hub_matches(db):
                 )
             )
             continue
+        if row["score"] is None:
+            excluded.append(
+                "Case {} x {} (graded by {}) is awaiting completion after a "
+                "rubric edit - the grader still owes the new/changed item or "
+                "the risk and approach questions.".format(
+                    row["case_id"], row["model_display_name"] or row["variant_id"],
+                    row["grader_name"],
+                )
+            )
+            continue
         if row["score"] not in RESULT_FOR_SCORE:
             continue
         matches.append({
@@ -192,7 +202,8 @@ def my_results():
         "JOIN grading_assignments ga ON ga.id = grades.assignment_id "
         "JOIN answers ON answers.id = grades.answer_id "
         "JOIN cases ON cases.id = answers.case_id "
-        "WHERE grades.superseded = 0 AND cases.owner_id = ? AND ga.grader_id = ?",
+        "WHERE grades.superseded = 0 AND grades.score IS NOT NULL "
+        "AND cases.owner_id = ? AND ga.grader_id = ?",
         (g.user["id"], g.user["id"]),
     ).fetchall()
     stats = {}

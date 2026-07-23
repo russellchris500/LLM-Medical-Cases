@@ -13,11 +13,56 @@
       EVERY item; each answer is then scored 0, 1, or 2 at grading time.</label>
     <textarea id="rubric" name="rubric"
       {% if read_only %}readonly{% endif %}>{{ form_rubric }}</textarea>
+    {% if confirm_questions %}
+      <div style="border:2px solid #c9a227; border-radius:8px; padding:6px 14px;
+                  margin:12px 0; background:#fdf8e7">
+        <h1 style="font-size:1.05rem">Before this edit is saved, decide:</h1>
+        {% for question in confirm_questions %}
+          {% if question['kind'] == 'answers' %}
+            <p><b>The case text changed and {{ question['count'] }} answer(s)
+            already exist</b> - they answered the OLD question. What should
+            happen to them?</p>
+            <div><label style="display:inline;font-weight:normal">
+              <input type="radio" name="answers_action" value="delete" required>
+              Delete them all - they show on the Run jobs page for a re-run,
+              and their grades are set aside</label></div>
+            <div><label style="display:inline;font-weight:normal">
+              <input type="radio" name="answers_action" value="keep">
+              Keep them - the change was cosmetic and the answers still
+              apply</label></div>
+          {% else %}
+            <p><b>Rubric item {{ question['index'] + 1 }} was changed.</b><br>
+            <span class="hint">Was: {{ question['old'] }}</span><br>
+            <span class="hint">Now: {{ question['new'] }}</span></p>
+            <div><label style="display:inline;font-weight:normal">
+              <input type="radio" name="changed_{{ question['index'] }}"
+                     value="reset" required>
+              Remove existing judgments for this item - each grader re-judges
+              just this line (other lines keep their grades)</label></div>
+            <div><label style="display:inline;font-weight:normal">
+              <input type="radio" name="changed_{{ question['index'] }}"
+                     value="keep">
+              Keep existing judgments - the wording change does not alter
+              what was judged</label></div>
+          {% endif %}
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% for name, value in (confirm_hidden or {}).items() %}
+      <input type="hidden" name="{{ name }}" value="{{ value }}">
+    {% endfor %}
     {% if not read_only %}
       <p class="hint">Changing the rubric of an already-graded case bumps its
-      rubric version; grades the change affects are automatically set aside
-      for re-grading.</p>
-      <p><button class="btn" type="submit">Save case</button>
+      rubric version. Deleted items take their judgments with them; added or
+      reset items come back to each grader as the ONLY thing left to answer -
+      everything else carries over.</p>
+      <p><button class="btn" type="submit">
+           {{ 'Confirm and save' if confirm_questions else 'Save case' }}</button>
+         {% if case and has_answers %}
+           <a class="btn secondary"
+              href="{{ url_for('grading.case_page', case_id=case['id']) }}">
+             Grade this case</a>
+         {% endif %}
          <a class="btn secondary" href="{{ url_for('cases.my_cases') }}">Back</a></p>
     {% else %}
       <p class="hint">You are viewing another grader's case - only they can
