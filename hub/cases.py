@@ -11,13 +11,14 @@ Same rules as the desktop Case Editor, enforced centrally:
 
 import difflib
 import json
+import re
 
 from flask import (
     Blueprint, abort, flash, g, redirect, render_template, request, url_for
 )
 
 from case_editor import now_iso
-from score_answers import compute_score, grade_survives_removal
+from score_answers import compute_score
 from .auth import grant_grader_number, is_grader, login_required
 from .db import get_db
 
@@ -66,11 +67,50 @@ def create_case(db, owner, case_text, rubric):
     return case_id
 
 
+# Leading list markers ("1.", "2)", "3]", "-", "*", bullets) are layout,
+# not substance: renumbering after a deletion must not count as rewording.
+_ENUM_PREFIX = re.compile(r"^\s*(?:\d+\s*[.)\]:]?|[-*•])\s*")
+
+
+def normalize_item(text):
+    """The substance of a rubric item: enumeration stripped, whitespace
+    collapsed, case-insensitive."""
+    return " ".join(_ENUM_PREFIX.sub("", text).split()).lower()
+
+
+def match_items(old, new):
+    """Match each NEW item to an OLD item with the same substance.
+
+    Returns (mapping, removed): mapping[i] is the old index whose content
+    the i-th new item carries (None for genuinely new/reworded items);
+    removed lists old indexes no new item claims. Matching consumes old
+    items in order, so duplicates pair up sanely."""
+    old_norm = [normalize_item(item) for item in old]
+    used = set()
+    mapping = []
+    for item in new:
+        norm = normalize_item(item)
+        found = None
+        for old_index, old_text in enumerate(old_norm):
+            if old_index not in used and old_text == norm:
+                found = old_index
+                break
+        if found is not None:
+            used.add(found)
+        mapping.append(found)
+    removed = [index for index in range(len(old)) if index not in used]
+    return mapping, removed
+
+
 def rubric_ops(old, new):
-    """What happened to each old item, computed by sequence diff: kept,
-    reworded (position-paired replacement), removed, or brand-new."""
+    """What happened to each old item, computed by sequence diff over the
+    NORMALIZED items (so renumbering reads as 'kept'): kept, reworded
+    (position-paired replacement), removed, or brand-new. Recorded in the
+    audit history; grade decisions use match_items instead."""
+    old_norm = [normalize_item(item) for item in old]
+    new_norm = [normalize_item(item) for item in new]
     ops = {"removed": [], "reworded": [], "added": []}
-    matcher = difflib.SequenceMatcher(None, old, new, autojunk=False)
+    matcher = difflib.SequenceMatcher(None, old_norm, new_norm, autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "delete":
             ops["removed"].extend(range(i1, i2))
@@ -84,20 +124,21 @@ def rubric_ops(old, new):
     return ops
 
 
-def invalidate_grades(db, case_id, ops, from_version, new_version):
+def invalidate_grades(db, case_id, old_rubric, new_rubric, new_version):
     """The blast-radius rules, applied instantly to every grader's grades
-    on this case (no update files, no emails):
+    on this case, decided by item CONTENT rather than position - so
+    deletions, renumberings, and reorderings never throw away a grade
+    they do not have to:
 
-    - pure removals: grades that covered the removed item(s), or that
-      missed some KEPT item anyway, are carried over losslessly (results
-      remapped, score recomputed); only grades that missed ONLY removed
-      items are set aside for re-grading (their risk/approach questions
-      were never asked).
-    - anything added or reworded: every older grade on the case is set
-      aside for re-grading.
-    Returns (requeued, carried)."""
-    clean_removal = not (ops["added"] or ops["reworded"])
-    removed = ops["removed"]
+    - every kept item inherits its judgment (results remapped by content,
+      score recomputed);
+    - grades that missed ONLY removed items are set aside for re-grading
+      (their risk/approach questions were never asked);
+    - any genuinely new or reworded item sets every older grade aside -
+      a fresh judgment is needed.
+    Returns (requeued, carried, has_new_content)."""
+    mapping, removed = match_items(old_rubric, new_rubric)
+    has_new_content = any(index is None for index in mapping)
     requeued = carried = 0
     rows = db.execute(
         "SELECT grades.* FROM grades JOIN grading_assignments ga "
@@ -109,14 +150,18 @@ def invalidate_grades(db, case_id, ops, from_version, new_version):
         if grade["rubric_version"] >= new_version:
             continue
         results = json.loads(grade["rubric_results"])
-        if (
-            clean_removal
-            and grade["rubric_version"] == from_version
-            and grade_survives_removal({"rubric_results": results}, removed)
-        ):
-            new_results = [
-                r for i, r in enumerate(results) if i not in removed
-            ]
+        carry = not has_new_content and len(results) == len(old_rubric)
+        if carry:
+            missed_removed = any(
+                results[index] is False for index in removed
+            )
+            covered_kept = all(results[index] for index in mapping)
+            if missed_removed and covered_kept:
+                # The score would now hinge on the risk/approach
+                # questions that were never asked.
+                carry = False
+        if carry:
+            new_results = [bool(results[index]) for index in mapping]
             score = compute_score(
                 new_results, grade["unnecessary_risk"], grade["poor_approach"]
             )
@@ -135,7 +180,7 @@ def invalidate_grades(db, case_id, ops, from_version, new_version):
                  grade["id"]),
             )
             requeued += 1
-    return requeued, carried
+    return requeued, carried, has_new_content
 
 
 def update_case(db, row, case_text, rubric):
@@ -146,7 +191,7 @@ def update_case(db, row, case_text, rubric):
     version = row["rubric_version"]
     history = json.loads(row["rubric_history"])
     info = {"rubric_changed": False, "new_version": version,
-            "requeued": 0, "carried": 0}
+            "requeued": 0, "carried": 0, "new_items": False}
     if rubric != old_rubric:
         ops = rubric_ops(old_rubric, rubric)
         history.append({
@@ -157,8 +202,8 @@ def update_case(db, row, case_text, rubric):
             "ops": ops,
             "edited_at": now_iso(),
         })
-        info["requeued"], info["carried"] = invalidate_grades(
-            db, row["id"], ops, version, version + 1
+        info["requeued"], info["carried"], info["new_items"] = (
+            invalidate_grades(db, row["id"], old_rubric, rubric, version + 1)
         )
         version += 1
         info.update(rubric_changed=True, new_version=version)
@@ -252,6 +297,10 @@ def edit_case(case_id):
                     message += (" {} grade(s) affected by the change were set "
                                 "aside and will come back for re-grading."
                                 .format(info["requeued"]))
+                    if info["new_items"]:
+                        message += (" (An item was added or reworded, so a "
+                                    "fresh judgment is needed on every "
+                                    "answer.)")
                 if info["carried"]:
                     message += (" {} grade(s) were carried over unchanged."
                                 .format(info["carried"]))

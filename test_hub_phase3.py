@@ -198,6 +198,70 @@ class GradingTests(unittest.TestCase):
         self.assertEqual(active[0]["rubric_version"], 2)
         self.assertEqual(len(superseded), 1)
 
+    def test_numbered_rubric_deletion_carries_the_score_2_grade(self):
+        # The reported bug: when rubric items carry their own numbers,
+        # deleting one renumbers the rest - that must read as a deletion,
+        # never as a rewording that throws every grade away.
+        self.login()
+        self.edit_rubric(["1. orders ECG", "2. orders troponin",
+                          "3. gives aspirin"])
+        self.open_queue()
+        self.grade("A", [True, True, True], risk=False, poor=False)  # a 2
+        self.grade("B", [True, False, True])  # missed ONLY the doomed item
+        response = self.edit_rubric(["1. orders ECG", "2. gives aspirin"])
+        self.assertIn(b"1 grade(s) were carried over", response.data)
+        self.assertIn(b"1 grade(s) affected", response.data)
+        db = self.db()
+        active = db.execute(
+            "SELECT * FROM grades WHERE superseded = 0").fetchall()
+        db.close()
+        self.assertEqual(len(active), 1)
+        self.assertEqual(active[0]["score"], 2)
+        self.assertEqual(json.loads(active[0]["rubric_results"]),
+                         [True, True])
+        self.assertEqual(active[0]["rubric_version"], 3)
+
+    def test_plain_deletion_carries_a_score_2_grade(self):
+        self.open_queue()
+        self.grade("A", [True, True, True], risk=False, poor=False)
+        self.edit_rubric(["orders ECG", "gives aspirin"])
+        db = self.db()
+        active = db.execute(
+            "SELECT * FROM grades WHERE superseded = 0").fetchall()
+        db.close()
+        self.assertEqual(len(active), 1)
+        self.assertEqual(active[0]["score"], 2)
+        self.assertEqual(json.loads(active[0]["rubric_results"]),
+                         [True, True])
+
+    def test_pure_reorder_carries_grades_with_results_remapped(self):
+        self.open_queue()
+        self.grade("A", [True, False, True])  # missed troponin
+        self.edit_rubric(["gives aspirin", "orders ECG", "orders troponin"])
+        db = self.db()
+        active = db.execute(
+            "SELECT * FROM grades WHERE superseded = 0").fetchall()
+        db.close()
+        self.assertEqual(len(active), 1)
+        # Results follow their items to the new positions.
+        self.assertEqual(json.loads(active[0]["rubric_results"]),
+                         [True, True, False])
+        self.assertEqual(active[0]["score"], 0)
+
+    def test_true_rewording_requeues_every_grade(self):
+        self.open_queue()
+        self.grade("A", [True, True, True], risk=False, poor=False)
+        response = self.edit_rubric(["orders ECG", "orders troponin and CK",
+                                     "gives aspirin"])
+        self.assertIn(b"1 grade(s) affected", response.data)
+        self.assertIn(b"added or reworded", response.data)
+        db = self.db()
+        active = db.execute(
+            "SELECT COUNT(*) AS n FROM grades WHERE superseded = 0"
+        ).fetchone()["n"]
+        db.close()
+        self.assertEqual(active, 0)
+
     def test_added_item_requeues_everything(self):
         self.open_queue()
         self.grade("A", [True, True, True], risk=False, poor=False)
