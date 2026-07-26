@@ -66,7 +66,61 @@ def run_jobs():
                 (g.user["id"],),
             )
         }
-        if not case_ids or not set(case_ids) <= owned:
+        if request.form.get("mode") == "missing":
+            # One job per selected LLM, holding every one of this
+            # grader's cases that LLM has not answered yet (discarded
+            # answers count as unanswered). Case ticks are ignored.
+            if not llm_ids:
+                error = "Pick at least one LLM."
+            else:
+                assignee = g.user
+                if send_to_pi:
+                    assignee = pi_user(db)
+                    if assignee is None:
+                        error = "No PI account exists yet."
+            if error is None:
+                display = dict(llm_choices())
+                note = request.form.get("note", "").strip()
+                created, covered = [], []
+                for llm_id in llm_ids:
+                    answered = {
+                        row["case_id"]
+                        for row in db.execute(
+                            "SELECT DISTINCT case_id FROM answers "
+                            "WHERE llm_id = ? AND status IN ('ok', 'ok_manual')",
+                            (llm_id,),
+                        )
+                    }
+                    missing = sorted(owned - answered)
+                    if missing:
+                        db.execute(
+                            "INSERT INTO run_jobs (requested_by, assigned_to, "
+                            "case_ids, llm_ids, note) VALUES (?, ?, ?, ?, ?)",
+                            (g.user["id"], assignee["id"], json.dumps(missing),
+                             json.dumps([llm_id]), note),
+                        )
+                        created.append("{} ({} case(s))".format(
+                            display.get(llm_id, llm_id), len(missing)
+                        ))
+                    else:
+                        covered.append(display.get(llm_id, llm_id))
+                db.commit()
+                if created:
+                    message = ("Created {} run job(s) covering the unanswered "
+                               "cases: {}. {} local Runner will run "
+                               "{}.".format(
+                                   len(created), "; ".join(created),
+                                   "The PI's" if send_to_pi else "Your",
+                                   "them" if len(created) > 1 else "it"))
+                    if covered:
+                        message += (" Already fully answered: {}."
+                                    .format(", ".join(covered)))
+                else:
+                    message = ("Nothing to run - every selected LLM already "
+                               "has an answer for each of your cases.")
+                flash(message)
+                return redirect(url_for("runs.run_jobs"))
+        elif not case_ids or not set(case_ids) <= owned:
             error = "Pick at least one of your own cases."
         elif not llm_ids:
             error = "Pick at least one LLM."

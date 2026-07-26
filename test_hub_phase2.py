@@ -96,6 +96,75 @@ class HubPhase2Tests(unittest.TestCase):
                                    headers=self.api(self.pi_token))
         self.assertEqual(len(response.get_json()["jobs"]), 1)
 
+    def test_missing_mode_creates_one_job_per_llm_with_unanswered_cases(self):
+        db = connect(self.app.config["DATABASE"])
+        db.execute(
+            "INSERT INTO cases (id, owner_id, case_number, case_text, rubric) "
+            "VALUES ('G001-002', ?, 2, 'Second case.', ?)",
+            (self.grader_id, json.dumps(["one item"])),
+        )
+        db.execute("UPDATE users SET max_assigned_case_number = 2 WHERE id = ?",
+                   (self.grader_id,))
+        # testmodel already answered the first case; claude answered nothing.
+        db.execute(
+            "INSERT INTO answers (case_id, run_by, llm_id, variant_id, "
+            "response_text, status, rubric_version_at_run) "
+            "VALUES ('G001-001', ?, 'testmodel', 'testmodel@test-model-1', "
+            "'done', 'ok', 1)",
+            (self.grader_id,),
+        )
+        db.commit()
+        db.close()
+        self.login()
+        response = self.client.post("/runs", data={
+            "llm_id": ["testmodel", "claude"], "assignee": "me",
+            "mode": "missing",
+        }, follow_redirects=True)
+        self.assertIn(b"Created 2 run job(s)", response.data)
+        db = connect(self.app.config["DATABASE"])
+        jobs = {
+            json.loads(row["llm_ids"])[0]: json.loads(row["case_ids"])
+            for row in db.execute("SELECT * FROM run_jobs").fetchall()
+        }
+        db.close()
+        self.assertEqual(jobs["testmodel"], ["G001-002"])
+        self.assertEqual(jobs["claude"], ["G001-001", "G001-002"])
+
+    def test_missing_mode_counts_discarded_as_unanswered_and_skips_covered(self):
+        db = connect(self.app.config["DATABASE"])
+        db.execute(
+            "INSERT INTO answers (case_id, run_by, llm_id, variant_id, "
+            "response_text, status, rubric_version_at_run) "
+            "VALUES ('G001-001', ?, 'testmodel', 'testmodel@test-model-1', "
+            "'done', 'ok', 1)",
+            (self.grader_id,),
+        )
+        db.commit()
+        db.close()
+        self.login()
+        # Everything answered: no job is created.
+        response = self.client.post("/runs", data={
+            "llm_id": ["testmodel"], "assignee": "me", "mode": "missing",
+        }, follow_redirects=True)
+        self.assertIn(b"Nothing to run", response.data)
+        db = connect(self.app.config["DATABASE"])
+        self.assertEqual(
+            db.execute("SELECT COUNT(*) AS n FROM run_jobs").fetchone()["n"], 0
+        )
+        db.execute("UPDATE answers SET status = 'discarded'")
+        db.commit()
+        db.close()
+        # A discarded answer needs a fresh run, so the case counts again.
+        response = self.client.post("/runs", data={
+            "llm_id": ["testmodel"], "assignee": "me", "mode": "missing",
+        }, follow_redirects=True)
+        self.assertIn(b"Created 1 run job(s)", response.data)
+        db = connect(self.app.config["DATABASE"])
+        row = db.execute("SELECT * FROM run_jobs").fetchone()
+        db.close()
+        self.assertEqual(json.loads(row["case_ids"]), ["G001-001"])
+        self.assertEqual(json.loads(row["llm_ids"]), ["testmodel"])
+
     def test_job_requires_own_cases(self):
         self.login("pi@example.org", "pi-password")
         response = self.client.post("/runs", data={

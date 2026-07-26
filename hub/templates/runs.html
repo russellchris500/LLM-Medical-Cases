@@ -81,7 +81,13 @@
       back here for grading, fully blinded)</label></div>
     <label for="note">Note (optional)</label>
     <input type="text" id="note" name="note">
-    <p><button class="btn" type="submit">Create the run job</button></p>
+    <p><button class="btn" type="submit">Create the run job</button>
+       <button class="btn secondary" type="submit" name="mode" value="missing">
+         Run all unanswered cases</button></p>
+    <p class="hint">"Run all unanswered cases" ignores the case ticks: for
+    each selected LLM it creates one job with every case of yours that LLM
+    has not answered yet (discarded answers count as unanswered). LLMs with
+    nothing missing get no job.</p>
   </form>
   <p class="hint">The exact model name (e.g. claude-opus-4-8) is taken from
   the Runner that executes the job; every answer records the full identity
