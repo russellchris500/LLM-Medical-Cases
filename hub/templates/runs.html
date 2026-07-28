@@ -66,10 +66,28 @@
         <input type="checkbox" name="case_id" value="{{ case['id'] }}">
         {{ case['id'] }} - {{ case['case_text'][:80] }}</label></div>
     {% endfor %}
-    <label>LLMs to ask</label>
-    {% for llm_id, label in llm_choices %}
-      <div><label style="display:inline;font-weight:normal">
-        <input type="checkbox" name="llm_id" value="{{ llm_id }}"> {{ label }}</label></div>
+    <label>Models to ask - grouped by site; every model is run, scored,
+      and ranked separately</label>
+    {% for group in llm_groups %}
+      <div style="margin:6px 0 2px"><b>{{ group['label'] }}</b>
+        {% if not group['models'] %}
+          <span class="hint">no models registered yet - add one below to
+            make this site selectable</span>
+        {% endif %}
+      </div>
+      {% for model in group['models'] %}
+        <div style="margin-left:18px">
+          <label style="display:inline;font-weight:normal">
+            <input type="checkbox" name="llm_model" value="{{ model['id'] }}">
+            {{ model['model_name'] }}</label>
+          {% if user['role'] == 'pi' %}
+            <button class="btn secondary" type="submit"
+                    formaction="{{ url_for('runs.remove_model', model_id=model['id']) }}"
+                    formmethod="post"
+                    style="padding:0 6px;font-size:0.8rem">hide</button>
+          {% endif %}
+        </div>
+      {% endfor %}
     {% endfor %}
     <label>Who runs it?</label>
     <div><label style="display:inline;font-weight:normal">
@@ -85,9 +103,23 @@
        <button class="btn secondary" type="submit" name="mode" value="missing">
          Run all unanswered cases</button></p>
     <p class="hint">"Run all unanswered cases" ignores the case ticks: for
-    each selected LLM it creates one job with every case of yours that LLM
-    has not answered yet (discarded answers count as unanswered). LLMs with
-    nothing missing get no job.</p>
+    each selected model it creates one job with every case of yours that
+    exact model has not answered yet (discarded answers count as
+    unanswered). Models with nothing missing get no job.</p>
+  </form>
+  <h1 style="font-size:1.05rem;margin-top:14px">Add a model</h1>
+  <form method="post" action="{{ url_for('runs.add_model') }}">
+    <select name="llm_id">
+      {% for llm_id, label in llm_choices %}
+        <option value="{{ llm_id }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+    <input type="text" name="model_name" style="width:40%"
+           placeholder="type the exact model name">
+    <button class="btn secondary" type="submit">Add the model</button>
+    <p class="hint">For API sites use the exact API model name. For browser
+    sites use the label of the model you pick on the site - set the same
+    model in the site's own picker before running.</p>
   </form>
   <p class="hint">The exact model name (e.g. claude-opus-4-8) is taken from
   the Runner that executes the job; every answer records the full identity

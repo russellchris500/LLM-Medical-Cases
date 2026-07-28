@@ -25,8 +25,10 @@ from flask import (
 
 from case_editor import now_iso
 from build_scoring_package import SELF_ID_STRINGS
+from eval_common import model_slug
 from .auth import login_required
 from .db import get_db
+from .runs import parse_llm_entries
 
 bp = Blueprint("runner_api", __name__)
 
@@ -118,11 +120,24 @@ def jobs():
             "WHERE id IN ({}) AND deleted = 0".format(marks),
             case_ids,
         ).fetchall()
+        entries = parse_llm_entries(job["llm_ids"])
         payload.append({
             "id": job["id"],
             "requested_by": job["requester_name"],
             "note": job["note"],
-            "llm_ids": json.loads(job["llm_ids"]),
+            # llm_ids: site ids only (what old Runners understand);
+            # llms: the full (site, model) selection - model_name is
+            # null on legacy entries, meaning "the Runner's configured
+            # model for that site".
+            "llm_ids": sorted({llm_id for llm_id, _ in entries}),
+            "llms": [
+                {
+                    "llm_id": llm_id,
+                    "model_name": model_name,
+                    "variant_id": model_slug(llm_id, model_name or ""),
+                }
+                for llm_id, model_name in entries
+            ],
             "cases": [
                 {
                     "case_id": c["id"],

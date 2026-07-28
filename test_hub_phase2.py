@@ -165,6 +165,190 @@ class HubPhase2Tests(unittest.TestCase):
         self.assertEqual(json.loads(row["case_ids"]), ["G001-001"])
         self.assertEqual(json.loads(row["llm_ids"]), ["testmodel"])
 
+    # ---- two-level (site, model) selection ----
+
+    def model_id_of(self, llm_id, model_name):
+        db = connect(self.app.config["DATABASE"])
+        row = db.execute(
+            "SELECT id FROM llm_models WHERE llm_id = ? AND model_name = ?",
+            (llm_id, model_name),
+        ).fetchone()
+        db.close()
+        return row["id"] if row else None
+
+    def test_model_list_seeds_add_and_hide(self):
+        self.login()
+        page = self.client.get("/runs")
+        self.assertIn(b"test-model-1", page.data)  # seeded
+        self.client.post("/runs/models/add", data={
+            "llm_id": "gpt", "model_name": "gpt-5-mini",
+        })
+        page = self.client.get("/runs")
+        self.assertIn(b"gpt-5-mini", page.data)
+        # Adding the same model twice stays one row.
+        self.client.post("/runs/models/add", data={
+            "llm_id": "gpt", "model_name": "gpt-5-mini",
+        })
+        db = connect(self.app.config["DATABASE"])
+        count = db.execute(
+            "SELECT COUNT(*) AS n FROM llm_models WHERE llm_id = 'gpt' "
+            "AND model_name = 'gpt-5-mini'"
+        ).fetchone()["n"]
+        db.close()
+        self.assertEqual(count, 1)
+        # Only the PI can hide a model; hiding keeps the row.
+        model_id = self.model_id_of("gpt", "gpt-5-mini")
+        response = self.client.post("/runs/models/{}/remove".format(model_id))
+        self.assertEqual(response.status_code, 403)
+        self.client.get("/logout")
+        self.login("pi@example.org", "pi-password")
+        self.client.post("/runs/models/{}/remove".format(model_id))
+        self.client.get("/logout")
+        self.login()
+        self.assertNotIn(b"gpt-5-mini", self.client.get("/runs").data)
+
+    def test_job_with_two_models_of_one_site(self):
+        self.login()
+        self.client.post("/runs/models/add", data={
+            "llm_id": "gpt", "model_name": "gpt-5-mini",
+        })
+        ids = [self.model_id_of("gpt", "gpt-5"),
+               self.model_id_of("gpt", "gpt-5-mini")]
+        self.client.post("/runs", data={
+            "case_id": ["G001-001"], "assignee": "me",
+            "llm_model": [str(i) for i in ids],
+        })
+        db = connect(self.app.config["DATABASE"])
+        job = db.execute("SELECT * FROM run_jobs").fetchone()
+        db.close()
+        self.assertEqual(json.loads(job["llm_ids"]), [
+            {"llm_id": "gpt", "model_name": "gpt-5"},
+            {"llm_id": "gpt", "model_name": "gpt-5-mini"},
+        ])
+        # The jobs table names both models; the runner payload carries
+        # per-model variants plus legacy site ids.
+        page = self.client.get("/runs")
+        self.assertIn(b"[gpt-5]", page.data)
+        self.assertIn(b"[gpt-5-mini]", page.data)
+        jobs = self.client.get(
+            "/api/runner/jobs", headers=self.api(self.grader_token)
+        ).get_json()["jobs"]
+        self.assertEqual(jobs[0]["llm_ids"], ["gpt"])
+        self.assertEqual(jobs[0]["llms"], [
+            {"llm_id": "gpt", "model_name": "gpt-5",
+             "variant_id": "gpt@gpt-5"},
+            {"llm_id": "gpt", "model_name": "gpt-5-mini",
+             "variant_id": "gpt@gpt-5-mini"},
+        ])
+
+    def test_missing_mode_is_per_model_not_per_site(self):
+        db = connect(self.app.config["DATABASE"])
+        # gpt-5 already answered the case; gpt-5-mini never ran.
+        db.execute(
+            "INSERT INTO answers (case_id, run_by, llm_id, variant_id, "
+            "response_text, status, rubric_version_at_run) "
+            "VALUES ('G001-001', ?, 'gpt', 'gpt@gpt-5', 'done', 'ok', 1)",
+            (self.grader_id,),
+        )
+        db.commit()
+        db.close()
+        self.login()
+        self.client.post("/runs/models/add", data={
+            "llm_id": "gpt", "model_name": "gpt-5-mini",
+        })
+        ids = [self.model_id_of("gpt", "gpt-5"),
+               self.model_id_of("gpt", "gpt-5-mini")]
+        response = self.client.post("/runs", data={
+            "llm_model": [str(i) for i in ids], "assignee": "me",
+            "mode": "missing",
+        }, follow_redirects=True)
+        self.assertIn(b"Created 1 run job(s)", response.data)
+        self.assertIn(b"Already fully answered", response.data)
+        db = connect(self.app.config["DATABASE"])
+        job = db.execute("SELECT * FROM run_jobs").fetchone()
+        db.close()
+        self.assertEqual(json.loads(job["llm_ids"]),
+                         [{"llm_id": "gpt", "model_name": "gpt-5-mini"}])
+        self.assertEqual(json.loads(job["case_ids"]), ["G001-001"])
+
+    def test_job_models_runs_two_variants_and_flags_browser_mismatch(self):
+        import hub_runner
+        from eval_common import SettingsStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = SettingsStore.load_or_create(
+                os.path.join(tmp, "settings.json")
+            )
+            settings.browser_model("openevidence")["model"] = "oe-local"
+            lines = []
+            job = {
+                "llm_ids": ["claude", "openevidence"],
+                "llms": [
+                    {"llm_id": "claude", "model_name": "claude-opus-4-8",
+                     "variant_id": "claude@claude-opus-4-8"},
+                    {"llm_id": "claude", "model_name": "claude-x",
+                     "variant_id": "claude@claude-x"},
+                    {"llm_id": "openevidence", "model_name": "oe-job",
+                     "variant_id": "openevidence@oe-job"},
+                ],
+            }
+            chosen = hub_runner.job_models(job, settings, lines.append)
+            variants = [entry["variant_id"] for entry in chosen]
+            self.assertEqual(variants, ["claude@claude-opus-4-8",
+                                        "claude@claude-x",
+                                        "openevidence@oe-job"])
+            names = {entry["variant_id"]: entry["model_name"]
+                     for entry in chosen}
+            self.assertEqual(names["claude@claude-x"], "claude-x")
+            self.assertTrue(any("model picker" in line for line in lines))
+
+    def test_run_api_phase_asks_under_the_entry_model_name(self):
+        import run_llms
+        from eval_common import AnswersStore, SettingsStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = SettingsStore.load_or_create(
+                os.path.join(tmp, "settings.json")
+            )
+            settings.api_model("claude")["api_key"] = "k"
+            settings.api_model("claude")["model"] = "from-settings"
+            answers = AnswersStore.load_or_create(
+                os.path.join(tmp, "answers.json"),
+                os.path.join(tmp, "images"),
+            )
+            master = type("M", (), {"cases": {"G001-001": {
+                "case_id": "G001-001", "case_text": "q", "rubric": [],
+                "rubric_version": 1,
+            }}})()
+            model = {
+                "model_id": "claude", "kind": "api",
+                "model_name": "from-the-job",
+                "variant_id": "claude@from-the-job",
+                "display_name": "Claude", "scored_as": "Claude (from-the-job)",
+            }
+            seen = []
+            original = run_llms.call_api_model
+
+            def fake_call(model_id, settings_entry, prompt, options, log=print):
+                seen.append(settings_entry.get("model"))
+                return {"response_text": "ok", "model_requested": "x",
+                        "model_reported": "x", "attempts": 1}
+
+            run_llms.call_api_model = fake_call
+            try:
+                class Ui:
+                    stop_requested = False
+
+                    def log(self, message):
+                        pass
+
+                run_llms.run_api_phase(master, answers, settings, [model],
+                                       {"claude@from-the-job": ["G001-001"]},
+                                       Ui())
+            finally:
+                run_llms.call_api_model = original
+            self.assertEqual(seen, ["from-the-job"])
+
     def test_job_requires_own_cases(self):
         self.login("pi@example.org", "pi-password")
         response = self.client.post("/runs", data={

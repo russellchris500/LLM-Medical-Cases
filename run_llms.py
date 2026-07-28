@@ -263,9 +263,15 @@ def run_api_phase(master, answers, settings, models, todo, ui):
                 if model["kind"] == "test":
                     result = run_test_model(case)
                 else:
+                    # The catalog entry's model name wins over Settings:
+                    # a hub job can ask one site for several models, and
+                    # each entry must hit the API under ITS name.
+                    settings_entry = dict(settings.api_model(model["model_id"]))
+                    if model.get("model_name"):
+                        settings_entry["model"] = model["model_name"]
                     result = call_api_model(
                         model["model_id"],
-                        settings.api_model(model["model_id"]),
+                        settings_entry,
                         record["prompt_sent"],
                         options,
                         log=ui.log,

@@ -15,7 +15,7 @@ questions come down and answers go up.
 import json
 import os
 
-from eval_common import AnswersStore, OK_STATUSES, SettingsStore
+from eval_common import AnswersStore, OK_STATUSES, SettingsStore, model_slug
 from hub_client import HubClient, HubError
 from run_llms import (
     build_worklist, model_catalog, run_everything,
@@ -79,33 +79,60 @@ def hub_client_from(settings):
 
 
 def job_models(job, settings, log):
-    """The catalog entries this Runner will use for the job's llm_ids,
-    with the same readiness rules as a local run."""
-    wanted = list(job["llm_ids"])
-    # The job asked for the test model explicitly: make sure the catalog
-    # includes it even when the local menu option that hides it is off.
+    """The catalog entries this Runner will use for the job's requested
+    (site, model) pairs, with the same readiness rules as a local run.
+
+    A model named by the job OVERRIDES the local Settings' model name,
+    so two models of the same site run as two separate variants in one
+    job. Legacy jobs (site only) keep using whatever this Runner is
+    configured for."""
+    requested = job.get("llms") or [
+        {"llm_id": llm_id, "model_name": None}
+        for llm_id in job.get("llm_ids", [])
+    ]
+    # A job asking for the test model works even when the local menu
+    # option that hides it is off.
     saved_flag = settings.data["options"].get("enable_test_model", False)
-    if "testmodel" in wanted:
+    if any(entry["llm_id"] == "testmodel" for entry in requested):
         settings.data["options"]["enable_test_model"] = True
     try:
-        catalog = model_catalog(settings)
+        catalog = {
+            entry["model_id"]: entry for entry in model_catalog(settings)
+        }
     finally:
         settings.data["options"]["enable_test_model"] = saved_flag
-    chosen, skipped = [], []
-    for entry in catalog:
-        if entry["model_id"] not in wanted:
+    chosen, skipped, seen = [], [], set()
+    for wanted in requested:
+        base = catalog.get(wanted["llm_id"])
+        if base is None:
+            skipped.append(wanted["llm_id"])
             continue
-        if entry["kind"] == "browser" and not entry["model_name"]:
+        entry = dict(base)
+        model_name = (wanted.get("model_name") or "").strip()
+        if model_name:
+            if (entry["kind"] == "browser" and entry["model_name"]
+                    and entry["model_name"] != model_name):
+                log("  NOTE: this job asks {} for model '{}', but this "
+                    "Runner's Settings say '{}'. Set the SITE'S OWN model "
+                    "picker to '{}' before running - the answers are "
+                    "recorded under that name.".format(
+                        entry["display_name"], model_name,
+                        entry["model_name"], model_name))
+            entry["model_name"] = model_name
+            entry["variant_id"] = model_slug(entry["model_id"], model_name)
+            entry["scored_as"] = "{} ({})".format(
+                entry["display_name"], model_name
+            )
+        elif entry["kind"] == "browser" and not entry["model_name"]:
             skipped.append(
                 "{} (set its model name in the classic Runner's Settings "
                 "first)".format(entry["display_name"])
             )
             continue
+        if entry["variant_id"] in seen:
+            continue
+        seen.add(entry["variant_id"])
         chosen.append(entry)
-    known = {entry["model_id"] for entry in chosen}
-    for llm_id in wanted:
-        if llm_id not in known and not any(llm_id in s for s in skipped):
-            skipped.append(llm_id)
     for line in skipped:
         log("  Skipping {} - this Runner is not set up for it.".format(line))
     return chosen

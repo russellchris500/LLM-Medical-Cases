@@ -193,7 +193,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS grades_one_active
     ON grades (assignment_id, answer_id) WHERE superseded = 0;
 """
 
-# Future additive changes: append ("0007", "ALTER TABLE ...") entries.
+# The two-level LLM list: a site (llm_id) fields any number of models,
+# each scored separately. Jobs pick (site, model) pairs from this table.
+# Rows are never deleted (old jobs/answers may reference them) - the PI
+# deactivates instead. Seeds are inserted by the app on startup.
+SCHEMA_0007 = """
+CREATE TABLE IF NOT EXISTS llm_models (
+    id INTEGER PRIMARY KEY,
+    llm_id TEXT NOT NULL,
+    model_name TEXT NOT NULL,
+    added_by INTEGER REFERENCES users(id),
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    UNIQUE (llm_id, model_name)
+);
+"""
+
+# Future additive changes: append ("0008", "ALTER TABLE ...") entries.
 MIGRATIONS = [
     ("0001", SCHEMA),
     ("0002", SCHEMA_0002),
@@ -201,6 +217,7 @@ MIGRATIONS = [
     ("0004", SCHEMA_0004),
     ("0005", SCHEMA_0005),
     ("0006", SCHEMA_0006),
+    ("0007", SCHEMA_0007),
 ]
 
 
