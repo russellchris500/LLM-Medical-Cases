@@ -4,13 +4,16 @@
 <div class="card">
   <h1>People</h1>
   <table>
-    <tr><th>Name</th><th>Email</th><th>Role</th><th>Grader #</th><th>Status</th></tr>
+    <tr><th>Name</th><th>Email</th><th>Role</th><th>Grader #</th>
+        <th>Cases written</th><th>Answers graded</th><th>Status</th></tr>
     {% for person in people %}
     <tr>
       <td>{{ person['name'] }}</td>
       <td>{{ person['email'] }}</td>
       <td>{{ 'PI' if person['role'] == 'pi' else 'Grader' }}</td>
       <td>{{ person['grader_number'] or '' }}</td>
+      <td>{{ cases_written.get(person['id'], 0) }}</td>
+      <td>{{ answers_graded.get(person['id'], 0) }}</td>
       <td>
         {% if person['invite_token'] %}
           Invited - send them:

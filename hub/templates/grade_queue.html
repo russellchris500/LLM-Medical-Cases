@@ -2,27 +2,45 @@
 {% block title %}Grade{% endblock %}
 {% block content %}
 <div class="card">
-  <h1>Grading queue</h1>
-  <p class="hint">Answers are anonymized and the letters are shuffled for
-  every case - answer A on one case is NOT the same AI as on another.</p>
+  <h1>Grading</h1>
+  {% set remaining = rows | sum(attribute='answers') - rows | sum(attribute='graded') %}
+  {% if rows and remaining %}
+    <p><a class="btn" href="{{ url_for('grading.next_answer') }}">Start
+      grading - {{ remaining }} answer{{ '' if remaining == 1 else 's' }}
+      waiting</a></p>
+    <p class="hint">One click takes you from answer to answer across all
+    your cases. Answers are anonymized (A, B, C...) and the letters are
+    shuffled for every case - A on one case is NOT the same AI as on
+    another.</p>
+  {% elif rows %}
+    <p><span class="chip good">All caught up</span> Every answer on your
+    cases is graded. New answers appear here the moment they arrive.</p>
+  {% else %}
+    <p>Nothing to grade yet - answers appear here once your cases have been
+    run (or the PI assigns you another grader's case).</p>
+  {% endif %}
   {% if rows %}
   <table>
-    <tr><th>Case</th><th>Kind</th><th>Answers</th><th>Graded</th><th></th></tr>
+    <tr><th>Case</th><th>Kind</th><th>Progress</th><th></th></tr>
     {% for row in rows %}
     <tr>
       <td>{{ row['assignment']['case_id'] }}</td>
       <td>{{ 'my case' if row['assignment']['kind'] == 'own' else 'cross-grading' }}</td>
-      <td>{{ row['answers'] }}</td>
-      <td>{{ row['graded'] }}</td>
+      <td>
+        {% if row['answers'] and row['graded'] == row['answers'] %}
+          <span class="chip good">graded {{ row['graded'] }}/{{ row['answers'] }}</span>
+        {% elif row['answers'] %}
+          <span class="chip wait">graded {{ row['graded'] }}/{{ row['answers'] }}</span>
+        {% else %}
+          <span class="chip idle">no answers yet</span>
+        {% endif %}
+      </td>
       <td><a class="btn secondary"
              href="{{ url_for('grading.case_page', case_id=row['assignment']['case_id']) }}">
           {{ 'Review' if row['graded'] == row['answers'] and row['answers'] else 'Grade' }}</a></td>
     </tr>
     {% endfor %}
   </table>
-  {% else %}
-    <p>Nothing to grade yet - answers appear here once your cases have been
-    run (or the PI assigns you another grader's case).</p>
   {% endif %}
 </div>
 {% endblock %}

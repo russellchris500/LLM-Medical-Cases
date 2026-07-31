@@ -1,0 +1,68 @@
+{% extends "layout.html" %}
+{% block title %}Home{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Hello, {{ user['name'] }} - here is what needs you</h1>
+  <div class="actions">
+    {% if user_is_grader %}
+      <a class="action{{ '' if counts['to_grade'] else ' quiet' }}"
+         href="{{ url_for('grading.next_answer') }}">
+        <div class="num">{{ counts['to_grade'] }}</div>
+        <div class="what">answer{{ '' if counts['to_grade'] == 1 else 's' }}
+          waiting for your grade</div>
+        <div class="why">{% if counts['to_grade'] %}Click to start grading -
+          the site walks you from answer to answer.{% else %}You are all
+          caught up.{% endif %}
+          {% if counts['to_finish'] %}Includes {{ counts['to_finish'] }}
+          quick finish{{ '' if counts['to_finish'] == 1 else 'es' }} after a
+          rubric change.{% endif %}</div>
+      </a>
+    {% endif %}
+    {% if counts['reruns'] %}
+      <a class="action" href="{{ url_for('runs.run_jobs') }}">
+        <div class="num">{{ counts['reruns'] }}</div>
+        <div class="what">answer{{ '' if counts['reruns'] == 1 else 's' }}
+          need{{ 's' if counts['reruns'] == 1 else '' }} a re-run</div>
+        <div class="why">Discarded during grading or after a question
+          changed - ask the AIs again.</div>
+      </a>
+    {% endif %}
+    {% if counts['open_jobs'] %}
+      <a class="action" href="{{ url_for('home.help_page') }}#running">
+        <div class="num">{{ counts['open_jobs'] }}</div>
+        <div class="what">job{{ '' if counts['open_jobs'] == 1 else 's' }}
+          waiting for your computer</div>
+        <div class="why">Open "Run Hub Jobs" on your own computer to run
+          {{ 'it' if counts['open_jobs'] == 1 else 'them' }} - answers upload
+          by themselves.</div>
+      </a>
+    {% endif %}
+    {% if counts['flags'] %}
+      <a class="action" href="{{ url_for('grading.flags_page') }}">
+        <div class="num">{{ counts['flags'] }}</div>
+        <div class="what">rubric concern{{ '' if counts['flags'] == 1 else 's' }}
+          to review</div>
+        <div class="why">A grader thinks a rubric item is too strict or
+          wrong - decide on the case's edit page.</div>
+      </a>
+    {% endif %}
+    {% if user_is_grader or user['role'] == 'pi' %}
+      <a class="action quiet" href="{{ url_for('cases.new_case') }}">
+        <div class="num">+</div>
+        <div class="what">Write a new case</div>
+        <div class="why">A clinical vignette plus the rubric an answer must
+          cover.{% if user_is_grader %} You have {{ counts['cases'] }} so
+          far.{% endif %}</div>
+      </a>
+    {% endif %}
+    {% if user['role'] == 'pi' %}
+      <a class="action quiet" href="{{ url_for('rankings.rankings_page') }}">
+        <div class="num">&#8942;</div>
+        <div class="what">Rankings</div>
+        <div class="why">The live leaderboard over every grade in the
+          study.</div>
+      </a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

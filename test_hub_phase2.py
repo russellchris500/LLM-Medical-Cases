@@ -439,7 +439,8 @@ class HubPhase2Tests(unittest.TestCase):
         self.assertTrue(response.get_json()["stored"])
         self.login()
         page = self.client.get("/runs")
-        self.assertIn(b"done - 2 answers", page.data)
+        self.assertIn(b'<span class="chip good">done</span>', page.data)
+        self.assertIn(b"2 answers", page.data)
 
 
 @unittest.skipUnless(FLASK, "Flask is not installed")

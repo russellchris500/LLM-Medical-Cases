@@ -1,46 +1,14 @@
 {% extends "layout.html" %}
-{% block title %}Run jobs{% endblock %}
+{% block title %}Ask the AIs{% endblock %}
 {% block content %}
-<div class="card">
-  <h1>{{ 'Run jobs (all)' if user['role'] == 'pi' else 'My run jobs' }}</h1>
-  {% if user['role'] == 'pi' %}
-    <p class="hint">Jobs assigned to you appear in your local Runner program
-    (Settings &gt; Hub) - run them there; answers upload automatically.</p>
-  {% endif %}
-  {% if jobs %}
-  <table>
-    <tr><th>#</th><th>Cases</th><th>LLMs</th><th>Requested by</th>
-        <th>Runs on</th><th>Status</th><th>Answers</th><th></th></tr>
-    {% for job in jobs %}
-    <tr>
-      <td>{{ job['id'] }}</td>
-      <td>{{ job['case_list'] }}</td>
-      <td>{{ job['llm_list'] }}</td>
-      <td>{{ job['requester_name'] }}</td>
-      <td>{{ job['assignee_name'] }}'s Runner</td>
-      <td>{{ job['status'] }}{% if job['status_note'] %} - {{ job['status_note'] }}{% endif %}</td>
-      <td>{{ job['received'] }} / {{ job['expected'] }}</td>
-      <td>
-        {% if job['status'] == 'open' and (user['role'] == 'pi' or job['requested_by'] == user['id']) %}
-        <form method="post" action="{{ url_for('runs.cancel_job', job_id=job['id']) }}"
-              style="display:inline">
-          <button class="btn secondary" type="submit">Cancel</button>
-        </form>
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% else %}<p>No run jobs yet.</p>{% endif %}
-</div>
 
 {% if discarded %}
 <div class="card">
   <h1>Discarded during grading - needs a re-run</h1>
   <p class="hint">These answers were judged incomplete (usually a bad
-  browser capture) and removed. Create a run job below for the case with
-  that LLM; the fresh answer replaces the old one under the same letter
-  and comes back for grading.</p>
+  browser capture) or the case's question changed. Create a run job below
+  for the case with that model; the fresh answer replaces the old one
+  under the same letter and comes back for grading.</p>
   <table>
     <tr><th>Case</th><th>Model</th><th>Reason</th><th>Discarded by</th></tr>
     {% for row in discarded %}
@@ -57,27 +25,22 @@
 
 {% if user_is_grader %}
 <div class="card">
-  <h1>New run job</h1>
+  <h1>Ask the AIs</h1>
   {% if my_cases %}
   <form method="post">
-    <label>Cases</label>
-    {% for case in my_cases %}
-      <div><label style="display:inline;font-weight:normal">
-        <input type="checkbox" name="case_id" value="{{ case['id'] }}">
-        {{ case['id'] }} - {{ case['case_text'][:80] }}</label></div>
-    {% endfor %}
-    <label>Models to ask - grouped by site; every model is run, scored,
-      and ranked separately</label>
+    <!-- Enter anywhere in the form means the green default action. -->
+    <button type="submit" name="mode" value="missing"
+            style="display:none" aria-hidden="true"></button>
+    <label>Step 1 - which models?</label>
+    <p class="hint">Tick every model you want an answer from. Each model is
+    run, scored, and ranked separately - even two models of the same
+    site.</p>
     {% for group in llm_groups %}
-      <div style="margin:6px 0 2px"><b>{{ group['label'] }}</b>
-        {% if not group['models'] %}
-          <span class="hint">no models registered yet - add one below to
-            make this site selectable</span>
-        {% endif %}
-      </div>
+      {% if group['models'] %}
+      <div style="margin:6px 0 2px"><b>{{ group['label'] }}</b></div>
       {% for model in group['models'] %}
         <div style="margin-left:18px">
-          <label style="display:inline;font-weight:normal">
+          <label class="choice" style="margin:2px 0">
             <input type="checkbox" name="llm_model" value="{{ model['id'] }}">
             {{ model['model_name'] }}</label>
           {% if user['role'] == 'pi' %}
@@ -88,45 +51,104 @@
           {% endif %}
         </div>
       {% endfor %}
+      {% endif %}
     {% endfor %}
-    <label>Who runs it?</label>
+
+    <label>Step 2 - which cases?</label>
+    <p class="hint">The green button below runs every case that is still
+    missing an answer - the usual choice. Tick cases only if you want to
+    re-ask specific ones with the white button.</p>
+    <div><label style="display:inline;font-weight:normal">
+      <input type="checkbox" id="allcases"
+             onclick="document.querySelectorAll('input[name=case_id]').forEach(c => c.checked = this.checked)">
+      <i>select all my cases</i></label></div>
+    {% for case in my_cases %}
+      <div><label style="display:inline;font-weight:normal">
+        <input type="checkbox" name="case_id" value="{{ case['id'] }}">
+        {{ case['id'] }} - {{ case['case_text'][:80] }}</label></div>
+    {% endfor %}
+
+    <label>Step 3 - whose computer runs it?</label>
     <div><label style="display:inline;font-weight:normal">
       <input type="radio" name="assignee" value="me" checked>
-      I run it myself (my computer, my API keys and site logins)</label></div>
+      Mine (my API keys and site logins)</label></div>
     <div><label style="display:inline;font-weight:normal">
       <input type="radio" name="assignee" value="pi">
-      Send it to the PI (I do not have access to these LLMs; answers come
-      back here for grading, fully blinded)</label></div>
+      The PI's (I do not have access to these AIs; answers come back here
+      for grading, fully blinded)</label></div>
     <label for="note">Note (optional)</label>
     <input type="text" id="note" name="note">
-    <p><button class="btn" type="submit">Create the run job</button>
-       <button class="btn secondary" type="submit" name="mode" value="missing">
-         Run all unanswered cases</button></p>
-    <p class="hint">"Run all unanswered cases" ignores the case ticks: for
-    each selected model it creates one job with every case of yours that
-    exact model has not answered yet (discarded answers count as
-    unanswered). Models with nothing missing get no job.</p>
+    <p><button class="btn" type="submit" name="mode" value="missing">
+         Run all unanswered cases</button>
+       <button class="btn secondary" type="submit">
+         Run only the ticked cases</button></p>
+    <p class="hint">Then open <b>Run Hub Jobs</b> on that computer - answers
+    upload to this site by themselves.
+    <a href="{{ url_for('home.help_page') }}#running">How running works</a> &middot;
+    <a href="{{ url_for('runner_api.runner_tokens') }}">Connect my computer</a></p>
   </form>
-  <h1 style="font-size:1.05rem;margin-top:14px">Add a model</h1>
-  <form method="post" action="{{ url_for('runs.add_model') }}">
-    <select name="llm_id">
-      {% for llm_id, label in llm_choices %}
-        <option value="{{ llm_id }}">{{ label }}</option>
-      {% endfor %}
-    </select>
-    <input type="text" name="model_name" style="width:40%"
-           placeholder="type the exact model name">
-    <button class="btn secondary" type="submit">Add the model</button>
-    <p class="hint">For API sites use the exact API model name. For browser
-    sites use the label of the model you pick on the site - set the same
-    model in the site's own picker before running.</p>
-  </form>
-  <p class="hint">The exact model name (e.g. claude-opus-4-8) is taken from
-  the Runner that executes the job; every answer records the full identity
-  it was actually run with.</p>
+  <details class="advanced">
+    <summary>Add a model to the list</summary>
+    <form method="post" action="{{ url_for('runs.add_model') }}">
+      <select name="llm_id">
+        {% for llm_id, label in llm_choices %}
+          <option value="{{ llm_id }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+      <input type="text" name="model_name" style="width:40%"
+             placeholder="type the exact model name">
+      <button class="btn secondary" type="submit">Add the model</button>
+      <p class="hint">For API sites use the exact API model name (e.g.
+      claude-opus-4-8). For browser sites use the label of the model you
+      pick on the site - and set the site's own picker to the same model
+      before running. Sites with no registered model do not appear in
+      Step 1.</p>
+    </form>
+  </details>
   {% else %}
-    <p>Write some cases first - then you can run them.</p>
+    <p>Write a case first - then you can ask the AIs to answer it.</p>
+    <p><a class="btn" href="{{ url_for('cases.new_case') }}">Write my first
+      case</a></p>
   {% endif %}
 </div>
 {% endif %}
+
+<div class="card">
+  <h1>{{ 'All run jobs' if user['role'] == 'pi' else 'My run jobs' }}</h1>
+  {% if user['role'] == 'pi' %}
+    <p class="hint">Jobs assigned to you appear in your local Run Hub Jobs
+    program - run them there; answers upload automatically.</p>
+  {% endif %}
+  {% if jobs %}
+  <table>
+    <tr><th>#</th><th>Cases</th><th>Models</th><th>Requested by</th>
+        <th>Runs on</th><th>Status</th><th>Answers</th><th></th></tr>
+    {% for job in jobs %}
+    <tr>
+      <td>{{ job['id'] }}</td>
+      <td>{{ job['case_list'] }}</td>
+      <td>{{ job['llm_list'] }}</td>
+      <td>{{ job['requester_name'] }}</td>
+      <td>{{ job['assignee_name'] }}'s computer</td>
+      <td>
+        {% if job['status'] == 'done' %}<span class="chip good">done</span>
+        {% elif job['status'] == 'open' %}<span class="chip wait">waiting to run</span>
+        {% else %}<span class="chip idle">{{ job['status'] }}</span>{% endif %}
+        {% if job['status_note'] %} - {{ job['status_note'] }}{% endif %}
+      </td>
+      <td>{{ job['received'] }} / {{ job['expected'] }}</td>
+      <td>
+        {% if job['status'] == 'open' and (user['role'] == 'pi' or job['requested_by'] == user['id']) %}
+        <form method="post" action="{{ url_for('runs.cancel_job', job_id=job['id']) }}"
+              style="display:inline">
+          <button class="btn secondary" type="submit">Cancel</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>No run jobs yet - create one above and the answers flow
+    straight into grading.</p>{% endif %}
+</div>
 {% endblock %}

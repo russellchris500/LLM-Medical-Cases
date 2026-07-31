@@ -5,28 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Study Hub{% endblock %} - LLM Medical Cases</title>
 <style>
-  :root { --ink:#1c2733; --line:#d8dee6; --accent:#155e94; --soft:#f4f6f9; }
+  :root { --ink:#1c2733; --line:#d8dee6; --accent:#155e94; --soft:#f4f6f9;
+          --good:#2e7d32; --wait:#a3660a; --idle:#5a6a7a; }
   * { box-sizing: border-box; }
   body { font-family:'Segoe UI', Arial, sans-serif; color:var(--ink);
-         margin:0; background:var(--soft); }
+         margin:0; background:var(--soft); font-size:16.5px; }
   header { background:#fff; border-bottom:1px solid var(--line);
-           padding:10px 20px; display:flex; align-items:baseline; gap:18px;
+           padding:12px 20px; display:flex; align-items:baseline; gap:18px;
            flex-wrap:wrap; }
   header .brand { font-weight:bold; font-size:1.05rem; }
+  header .brand a { color:var(--ink); }
   header a { color:var(--accent); text-decoration:none; }
   header a:hover { text-decoration:underline; }
   header .who { margin-left:auto; color:#5a6a7a; }
+  header .navcount { display:inline-block; background:var(--accent);
+    color:#fff; border-radius:10px; padding:0 7px; font-size:0.8rem;
+    vertical-align:2px; }
   main { max-width:960px; margin:20px auto; padding:0 16px; }
   .card { background:#fff; border:1px solid var(--line); border-radius:8px;
           padding:18px 20px; margin-bottom:16px; }
   h1 { font-size:1.25rem; margin:0 0 12px; }
   table { border-collapse:collapse; width:100%; }
-  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line);
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line);
            vertical-align:top; }
   th { color:#5a6a7a; font-weight:600; font-size:0.85rem;
        text-transform:uppercase; letter-spacing:0.03em; }
   .btn { display:inline-block; background:var(--accent); color:#fff;
-         border:none; border-radius:6px; padding:8px 14px; font-size:0.95rem;
+         border:none; border-radius:6px; padding:9px 16px; font-size:0.95rem;
          cursor:pointer; text-decoration:none; }
   .btn.secondary { background:#fff; color:var(--accent);
                    border:1px solid var(--accent); }
@@ -41,25 +46,60 @@
   textarea { min-height:140px; }
   .hint { color:#5a6a7a; font-size:0.88rem; margin-top:4px; }
   code { background:var(--soft); padding:1px 5px; border-radius:4px; }
+  /* Status chips: green = done, amber = waiting on you, grey = idle. */
+  .chip { display:inline-block; border-radius:12px; padding:2px 11px;
+          font-size:0.82rem; font-weight:600; white-space:nowrap; }
+  .chip.good { background:#e6f2e6; color:var(--good); }
+  .chip.wait { background:#fdf3e1; color:var(--wait); }
+  .chip.idle { background:#eef1f5; color:var(--idle); }
+  /* Home-page action buttons: one big card per thing that needs you. */
+  .actions { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));
+             gap:14px; }
+  .action { display:block; background:#fff; border:1px solid var(--line);
+            border-radius:10px; padding:16px 18px; text-decoration:none;
+            color:var(--ink); }
+  .action:hover { border-color:var(--accent); }
+  .action .num { font-size:1.9rem; font-weight:700; color:var(--accent); }
+  .action .what { font-weight:600; margin-top:2px; }
+  .action .why { color:#5a6a7a; font-size:0.88rem; margin-top:4px; }
+  .action.quiet .num { color:var(--idle); }
+  /* Covered/Missed choice pills on the grading page. */
+  .choice { display:inline-block; border:1px solid var(--line);
+            border-radius:18px; padding:7px 16px; cursor:pointer;
+            font-weight:normal; margin:2px 4px 2px 0; user-select:none; }
+  .choice input { position:absolute; opacity:0; pointer-events:none; }
+  .choice:has(input:checked) { background:var(--accent); color:#fff;
+                               border-color:var(--accent); }
+  details.advanced { margin-top:14px; }
+  details.advanced summary { cursor:pointer; color:var(--accent);
+                             font-weight:600; }
+  @media (max-width: 700px) {
+    main { margin:10px auto; }
+    .card { padding:14px; }
+    th, td { padding:9px 6px; }
+    .btn { padding:11px 16px; }
+  }
 </style>
 </head>
 <body>
 <header>
-  <span class="brand">LLM Medical Cases - Study Hub</span>
+  <span class="brand"><a href="{{ url_for('index') }}">LLM Medical Cases</a></span>
   {% if user %}
-    <a href="{{ url_for('cases.my_cases') }}">Cases</a>
-    <a href="{{ url_for('runs.run_jobs') }}">Run jobs</a>
+    <a href="{{ url_for('home.dashboard') }}">Home</a>
+    <a href="{{ url_for('cases.my_cases') }}">My cases</a>
+    <a href="{{ url_for('runs.run_jobs') }}">Ask the AIs</a>
     {% if user_is_grader %}
-      <a href="{{ url_for('grading.queue') }}">Grade</a>
+      <a href="{{ url_for('grading.queue') }}">Grade{% if nav_grade_count %}
+        <span class="navcount">{{ nav_grade_count }}</span>{% endif %}</a>
       <a href="{{ url_for('rankings.my_results') }}">My results</a>
     {% endif %}
-    <a href="{{ url_for('grading.flags_page') }}">Flags</a>
-    <a href="{{ url_for('runner_api.runner_tokens') }}">Runner tokens</a>
+    <a href="{{ url_for('grading.flags_page') }}">Rubric concerns</a>
     {% if user['role'] == 'pi' %}
       <a href="{{ url_for('rankings.rankings_page') }}">Rankings</a>
       <a href="{{ url_for('grading.assignments_page') }}">Cross-grading</a>
       <a href="{{ url_for('auth.people') }}">People</a>
     {% endif %}
+    <a href="{{ url_for('home.help_page') }}">Help</a>
     <span class="who">{{ user['name'] }}
       ({{ 'Principal investigator' if user['role'] == 'pi' else 'Grader' }})
       &middot; <a href="{{ url_for('auth.logout') }}">Sign out</a></span>

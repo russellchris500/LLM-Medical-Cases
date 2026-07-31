@@ -241,9 +241,11 @@ def run_jobs():
                 )
                 db.commit()
                 flash(
-                    "Run job created - {} will run it with their local Runner "
-                    "program.".format(
-                        "the PI" if send_to_pi else "you"
+                    "Run job created - {} Answers upload to this site "
+                    "automatically and go straight into grading.".format(
+                        "the PI's computer runs it next."
+                        if send_to_pi else
+                        "now open 'Run Hub Jobs' on your computer and run it."
                     )
                 )
                 return redirect(url_for("runs.run_jobs"))

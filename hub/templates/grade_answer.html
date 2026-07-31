@@ -18,17 +18,20 @@
     #gradepanel { order: 2; position: sticky; top: 12px;
                   max-height: calc(100vh - 24px); overflow-y: auto; }
   }
-  #gradepanel p { margin: 8px 0; }
+  #gradepanel p { margin: 10px 0; }
 </style>
 <div class="gradegrid">
 <div id="answercol">
 <div class="card" style="margin-bottom:16px">
-  <h1>Case {{ case['id'] }} - answer {{ answer['label'] }}</h1>
-  <p class="hint">
-    {% if run_blind %}This answer was run by someone else - you are grading
-    fully blinded.{% else %}Note: this answer came from a run YOU made, so
-    you may have seen which AI wrote it (recorded for the methods
-    section).{% endif %}
+  <h1>Case {{ case['id'] }} - answer {{ answer['label'] }}
+    <span class="hint" style="font-weight:normal">({{ position }} of
+    {{ total }} on this case)</span></h1>
+  <p>
+    {% if run_blind %}<span class="chip good">&#128274; Blinded - you cannot
+    see which AI wrote this</span>
+    {% else %}<span class="chip wait">From a run YOU made - you may have
+    seen which AI wrote it (recorded for the methods section)</span>
+    {% endif %}
   </p>
   <details open>
     <summary style="cursor:pointer;font-weight:600">Case text</summary>
@@ -58,48 +61,50 @@
 <div id="gradepanel">
 <div class="card">
   <h1>Your grading</h1>
+  {% if pending_note %}
+    <p class="flash" style="margin:0 0 10px">{{ pending_note }}</p>
+  {% endif %}
   <form method="post" id="gradeform">
     {% for item in rubric %}
       <p><b>{{ loop.index }}. {{ item }}</b><br>
       {% set index = loop.index0 %}
       {% set current = form['results'][index] if index < form['results']|length else None %}
-      <label style="display:inline;font-weight:normal">
+      <label class="choice">
         <input type="radio" name="item_{{ index }}" value="yes"
           {% if current == true %}checked{% endif %}> Covered</label>
-      &nbsp;
-      <label style="display:inline;font-weight:normal">
+      <label class="choice">
         <input type="radio" name="item_{{ index }}" value="no"
           {% if current == false %}checked{% endif %}> Missed</label>
       </p>
     {% endfor %}
     <p id="riskrow"><b>Did the answer take any unnecessary risk with the
       patient?</b><br>
-      <label style="display:inline;font-weight:normal">
+      <label class="choice">
         <input type="radio" name="risk" value="yes"
           {% if form['risk'] == 1 %}checked{% endif %}> Yes</label>
-      &nbsp;
-      <label style="display:inline;font-weight:normal">
+      <label class="choice">
         <input type="radio" name="risk" value="no"
           {% if form['risk'] == 0 %}checked{% endif %}> No</label>
     </p>
     <p id="poorrow"><b>Was the approach poor, even though everything was
       covered?</b><br>
-      <label style="display:inline;font-weight:normal">
+      <label class="choice">
         <input type="radio" name="poor" value="yes"
           {% if form['poor'] == 1 %}checked{% endif %}> Yes</label>
-      &nbsp;
-      <label style="display:inline;font-weight:normal">
+      <label class="choice">
         <input type="radio" name="poor" value="no"
           {% if form['poor'] == 0 %}checked{% endif %}> No</label>
     </p>
     <p class="hint">Score 0 = any item missed or unnecessary risk;
        1 = all covered but poor approach; 2 = all covered, sound approach.
-       The risk question only applies once every item is Covered.</p>
+       The final questions appear once every item is Covered.</p>
     <label for="comment">Comment for the record (optional)</label>
     <input type="text" id="comment" name="comment" value="{{ form['comment'] }}">
-    <p><button class="btn" type="submit">Save the grade</button>
+    <p><button class="btn" type="submit">Save and go to the next answer</button>
        <a class="btn secondary"
           href="{{ url_for('grading.case_page', case_id=case['id']) }}">Back</a></p>
+    <p class="hint">Keyboard: press 1-9 to toggle an item between Covered
+      and Missed; Enter saves.</p>
   </form>
 </div>
 </div>
@@ -107,22 +112,39 @@
 <script>
 (function () {
   var form = document.getElementById('gradeform');
+  var itemCount = {{ rubric | length }};
   function update() {
     var allCovered = true;
-    {% for item in rubric %}
-    (function () {
-      var picked = form.querySelector('input[name=item_{{ loop.index0 }}]:checked');
+    for (var i = 0; i < itemCount; i++) {
+      var picked = form.querySelector('input[name=item_' + i + ']:checked');
       if (!picked || picked.value !== 'yes') allCovered = false;
-    })();
-    {% endfor %}
-    var riskYes = form.querySelector('input[name=risk][value=yes]');
+    }
     var riskPicked = form.querySelector('input[name=risk]:checked');
-    document.getElementById('riskrow').style.opacity = allCovered ? 1 : 0.45;
     var poorApplies = allCovered && riskPicked && riskPicked.value === 'no';
-    document.getElementById('poorrow').style.opacity = poorApplies ? 1 : 0.45;
+    document.getElementById('riskrow').style.display = allCovered ? '' : 'none';
+    document.getElementById('poorrow').style.display = poorApplies ? '' : 'none';
   }
   form.addEventListener('change', update);
   update();
+  document.addEventListener('keydown', function (event) {
+    var tag = (document.activeElement || {}).tagName || '';
+    if (tag === 'INPUT' && document.activeElement.type === 'text') {
+      return;  /* typing a comment or a discard reason */
+    }
+    if (event.key >= '1' && event.key <= '9') {
+      var index = Number(event.key) - 1;
+      if (index >= itemCount) return;
+      var yes = form.querySelector(
+        'input[name=item_' + index + '][value=yes]');
+      var no = form.querySelector('input[name=item_' + index + '][value=no]');
+      if (yes.checked) { no.checked = true; } else { yes.checked = true; }
+      update();
+      event.preventDefault();
+    } else if (event.key === 'Enter') {
+      form.requestSubmit();
+      event.preventDefault();
+    }
+  });
 })();
 </script>
 {% endblock %}

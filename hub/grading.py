@@ -98,6 +98,60 @@ def ensure_blind_labels(db, assignment):
     ).fetchall()
 
 
+def grading_todo_count(db, grader_id):
+    """How many answers still need this grader (ungraded or pending),
+    WITHOUT creating assignments or labels - safe to call on any page."""
+    case_ids = {
+        row["id"]
+        for row in db.execute(
+            "SELECT DISTINCT cases.id FROM cases JOIN answers "
+            "ON answers.case_id = cases.id "
+            "AND answers.status IN ('ok', 'ok_manual') "
+            "WHERE cases.owner_id = ? AND cases.deleted = 0",
+            (grader_id,),
+        )
+    }
+    case_ids |= {
+        row["case_id"]
+        for row in db.execute(
+            "SELECT ga.case_id FROM grading_assignments ga "
+            "JOIN cases ON cases.id = ga.case_id "
+            "WHERE ga.grader_id = ? AND cases.deleted = 0",
+            (grader_id,),
+        )
+    }
+    todo = 0
+    for case_id in case_ids:
+        answers = gradable_answers(db, case_id)
+        assignment = db.execute(
+            "SELECT id FROM grading_assignments "
+            "WHERE grader_id = ? AND case_id = ?",
+            (grader_id, case_id),
+        ).fetchone()
+        graded = 0
+        if assignment is not None:
+            for answer in answers:
+                grade = active_grade(db, assignment["id"], answer["id"])
+                if grade is not None and grade["score"] is not None:
+                    graded += 1
+        todo += len(answers) - graded
+    return todo
+
+
+def grading_pending_count(db, grader_id):
+    """Grades left half-done by a rubric edit (score NULL) - shown
+    separately so the grader knows these are quick finishes."""
+    return db.execute(
+        "SELECT COUNT(*) AS n FROM grades "
+        "JOIN grading_assignments ga ON ga.id = grades.assignment_id "
+        "JOIN answers ON answers.id = grades.answer_id "
+        "WHERE ga.grader_id = ? AND grades.superseded = 0 "
+        "AND grades.score IS NULL "
+        "AND answers.status IN ('ok', 'ok_manual')",
+        (grader_id,),
+    ).fetchone()["n"]
+
+
 def my_assignment(db, case_id):
     row = db.execute(
         "SELECT * FROM grading_assignments WHERE grader_id = ? AND case_id = ?",
@@ -147,6 +201,33 @@ def queue():
             "graded": graded,
         })
     return render_template("grade_queue.html", rows=queue_rows)
+
+
+@bp.route("/grade/next")
+@login_required
+def next_answer():
+    """One click from anywhere to the next answer that needs this
+    grader - across ALL their cases."""
+    if not is_grader(g.user):
+        return redirect(url_for("grading.queue"))
+    db = get_db()
+    ensure_own_assignments(db, g.user["id"])
+    assignments = db.execute(
+        "SELECT grading_assignments.* FROM grading_assignments "
+        "JOIN cases ON cases.id = grading_assignments.case_id "
+        "WHERE grader_id = ? AND cases.deleted = 0 ORDER BY cases.id",
+        (g.user["id"],),
+    ).fetchall()
+    for assignment in assignments:
+        for answer in ensure_blind_labels(db, assignment):
+            grade = active_grade(db, assignment["id"], answer["id"])
+            if grade is None or grade["score"] is None:
+                return redirect(url_for(
+                    "grading.answer_page",
+                    case_id=assignment["case_id"], label=answer["label"],
+                ))
+    flash("You are all caught up - nothing left to grade right now.")
+    return redirect(url_for("grading.queue"))
 
 
 @bp.route("/grade/<case_id>")
@@ -251,15 +332,15 @@ def answer_page(case_id, label):
             flash("Saved: answer {} of case {} scored {}.".format(
                 answer["label"], case_id, score
             ))
-            # Next answer still needing this grader (ungraded or left
-            # pending by a rubric edit), if any.
+            # Next answer still needing this grader: first within this
+            # case, then automatically on to their next case.
             for row in ensure_blind_labels(db, assignment):
                 grade = active_grade(db, assignment["id"], row["id"])
                 if grade is None or grade["score"] is None:
                     return redirect(url_for(
                         "grading.answer_page", case_id=case_id, label=row["label"]
                     ))
-            return redirect(url_for("grading.case_page", case_id=case_id))
+            return redirect(url_for("grading.next_answer"))
 
     answer_html = markdown_to_html(
         answer["response_text"] or "(no text)", title="Answer " + answer["label"]
@@ -274,10 +355,26 @@ def answer_page(case_id, label):
         "poor": previous["poor_approach"] if previous else None,
         "comment": previous["comment"] if previous else "",
     }
+    # "Answer 2 of 5" progress within this case.
+    labels = [row["label"] for row in ensure_blind_labels(db, assignment)]
+    position = labels.index(answer["label"]) + 1 if answer["label"] in labels else 1
+    # A grade left half-done by a rubric edit: tell the grader exactly
+    # what is still owed.
+    pending_note = None
+    if previous is not None and previous["score"] is None:
+        if any(value is None for value in form["results"]):
+            pending_note = ("The rubric changed since you graded this "
+                            "answer. Your other judgments were kept - only "
+                            "the unanswered item(s) below need you.")
+        else:
+            pending_note = ("The rubric changed since you graded this "
+                            "answer. Every item judgment was kept - only "
+                            "the final questions below still need answers.")
     return render_template(
         "grade_answer.html", case=case, answer=answer, rubric=rubric,
         answer_body=body, image_count=image_count, form=form, error=error,
         run_blind=not answer["run_by_owner"],
+        position=position, total=len(labels), pending_note=pending_note,
     )
 
 

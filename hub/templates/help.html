@@ -1,0 +1,65 @@
+{% extends "layout.html" %}
+{% block title %}Help{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>How the study works</h1>
+  <p>Each case travels one road:
+  <b>write the case &rarr; ask the AIs &rarr; grade the answers &rarr;
+  results</b>. The Home page always shows the step waiting on you.</p>
+</div>
+
+<div class="card" id="cases">
+  <h1>1. I write cases</h1>
+  <p>On <a href="{{ url_for('cases.my_cases') }}">My cases</a>, click
+  <b>New case</b>. A case is a clinical vignette (the question every AI is
+  asked) plus a <b>rubric</b>: one line per thing a good answer must cover.
+  At grading time each answer gets 0, 1, or 2 - 0 if any rubric item is
+  missed or the answer takes an unnecessary risk, 1 if everything is
+  covered but the approach is poor, 2 if it is covered and sound.</p>
+  <p>You can edit a case later. The site protects earlier work: deleting a
+  rubric item keeps everyone's other judgments, adding one only asks
+  graders about the new line, and changing the question text asks you what
+  to do with answers that already exist.</p>
+</div>
+
+<div class="card" id="running">
+  <h1>2. I ask the AIs</h1>
+  <p>On <a href="{{ url_for('runs.run_jobs') }}">Ask the AIs</a>, tick the
+  models you want and click <b>Run all unanswered cases</b> (or pick
+  specific cases). If you do not have access to some AIs, choose
+  <b>Send it to the PI</b> and their computer runs it instead.</p>
+  <p>The AIs are run by the <b>Run Hub Jobs</b> program on your own
+  computer, because chat sites need a real browser and your own logins.
+  One-time setup: create a token on the
+  <a href="{{ url_for('runner_api.runner_tokens') }}">Connect my
+  computer</a> page, open <b>Run Hub Jobs</b>, and paste the site address
+  and token. After that: open the program, click the job, click Run.
+  Answers upload to the site by themselves as they are captured, and an
+  interrupted run resumes where it stopped.</p>
+</div>
+
+<div class="card" id="grading">
+  <h1>3. I grade</h1>
+  <p>Click <b>Grade</b> in the top bar (the number is how many answers are
+  waiting). Answers are shown as <b>A, B, C...</b> - you never see which AI
+  wrote what, and the letters are shuffled differently on every case. For
+  each rubric item mark <b>Covered</b> or <b>Missed</b>; the final two
+  questions appear when everything is covered. Saving moves you straight
+  to the next answer.</p>
+  <p>If an answer is cut off or garbled, use the <b>Discard</b> button
+  under it - it goes back for a re-run and returns under the same letter.
+  If a rubric item feels wrong, <b>flag</b> it and keep grading; fixing the
+  rubric later only re-asks exactly what the change affects.</p>
+</div>
+
+<div class="card" id="pi">
+  <h1>4. The PI's corner</h1>
+  <p><b>Rankings</b> is the live leaderboard: every grade counts as a match
+  between an AI and a case, fitted into Elo ratings, with inter-rater
+  agreement when several graders scored the same answer.
+  <b>Cross-grading</b> assigns one grader's cases to another for fully
+  blinded second opinions. <b>People</b> invites graders (you email the
+  invitation link yourself). The PI can also write, run, and grade cases
+  like any grader.</p>
+</div>
+{% endblock %}

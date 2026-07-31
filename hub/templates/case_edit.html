@@ -71,4 +71,18 @@
     {% endif %}
   </form>
 </div>
+<script>
+// Never lose a half-written vignette: warn before leaving with unsaved
+// edits. Saving (any submit inside the form) disarms the warning.
+(function () {
+  var form = document.querySelector('form[method=post]');
+  if (!form) return;
+  var dirty = false;
+  form.addEventListener('input', function () { dirty = true; });
+  form.addEventListener('submit', function () { dirty = false; });
+  window.addEventListener('beforeunload', function (event) {
+    if (dirty) { event.preventDefault(); event.returnValue = ''; }
+  });
+})();
+</script>
 {% endblock %}

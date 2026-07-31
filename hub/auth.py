@@ -185,6 +185,24 @@ def people():
         row["id"]: url_for("auth.join", token=row["invite_token"], _external=True)
         for row in rows if row["invite_token"]
     }
+    # Friendly accountability: what each person has contributed.
+    cases_written = {
+        row["owner_id"]: row["n"]
+        for row in db.execute(
+            "SELECT owner_id, COUNT(*) AS n FROM cases WHERE deleted = 0 "
+            "GROUP BY owner_id"
+        )
+    }
+    answers_graded = {
+        row["grader_id"]: row["n"]
+        for row in db.execute(
+            "SELECT ga.grader_id, COUNT(*) AS n FROM grades "
+            "JOIN grading_assignments ga ON ga.id = grades.assignment_id "
+            "WHERE grades.superseded = 0 AND grades.score IS NOT NULL "
+            "GROUP BY ga.grader_id"
+        )
+    }
     return render_template(
-        "people.html", people=rows, invite_links=invite_links, error=error
+        "people.html", people=rows, invite_links=invite_links, error=error,
+        cases_written=cases_written, answers_graded=answers_graded,
     )

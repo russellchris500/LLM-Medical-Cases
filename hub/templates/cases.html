@@ -14,15 +14,16 @@
     <tr>
       <th>Case</th>
       {% if user['role'] == 'pi' %}<th>Grader</th>{% endif %}
-      <th>Rubric items</th><th>Rubric v</th><th>Case text</th><th></th>
+      <th>Where it stands</th>
+      <th>Rubric items</th><th>Case text</th><th></th>
     </tr>
     {% for case in cases %}
     <tr>
       <td><a href="{{ url_for('cases.edit_case', case_id=case['id']) }}">{{ case['id'] }}</a></td>
       {% if user['role'] == 'pi' %}<td>{{ case['owner_name'] }}</td>{% endif %}
+      <td><span class="chip {{ case['status_kind'] }}">{{ case['status_text'] }}</span></td>
       <td>{{ case['rubric_items'] }}</td>
-      <td>{{ case['rubric_version'] }}</td>
-      <td>{{ case['case_text'][:110] }}{% if case['case_text']|length > 110 %}...{% endif %}</td>
+      <td>{{ case['case_text'][:90] }}{% if case['case_text']|length > 90 %}...{% endif %}</td>
       <td>
         {% if case['owner_id'] == user['id'] %}
         <form method="post" style="display:inline"

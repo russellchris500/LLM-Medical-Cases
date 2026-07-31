@@ -40,7 +40,7 @@ def create_app(instance_dir=None, secret_key=None):
 
     hub_db.init_app(app)
 
-    from . import auth, cases, grading, rankings, runner_api, runs
+    from . import auth, cases, grading, home, rankings, runner_api, runs
 
     app.register_blueprint(auth.bp)
     app.register_blueprint(cases.bp)
@@ -48,11 +48,12 @@ def create_app(instance_dir=None, secret_key=None):
     app.register_blueprint(runner_api.bp)
     app.register_blueprint(grading.bp)
     app.register_blueprint(rankings.bp)
+    app.register_blueprint(home.bp)
 
     @app.route("/")
     def index():
         if g.user is None:
             return redirect(url_for("auth.login"))
-        return redirect(url_for("cases.my_cases"))
+        return redirect(url_for("home.dashboard"))
 
     return app

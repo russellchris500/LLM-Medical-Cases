@@ -162,6 +162,21 @@ class GradingTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["score"], 1)
 
+    # ---- home dashboard and one-click grading ----
+
+    def test_dashboard_counts_and_next_answer_flow(self):
+        self.login()
+        page = self.client.get("/home")
+        self.assertIn(b"waiting for your grade", page.data)
+        response = self.client.get("/grade/next")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/grade/G001-001/", response.headers["Location"])
+        # Saving walks answer to answer; the last save says so.
+        self.open_queue()
+        self.grade("A", [True, True, True], risk=False, poor=False)
+        response = self.grade("B", [True, True, True], risk=False, poor=False)
+        self.assertIn(b"all caught up", response.data)
+
     # ---- flags ----
 
     def test_flag_reaches_the_case_owner(self):

@@ -300,6 +300,36 @@ def update_case(db, row, case_text, rubric, decisions, editor_id):
     return info
 
 
+def case_status(db, row):
+    """The one-glance pipeline stage of a case, from its OWNER's side:
+    (chip kind, chip text). green = done, amber = waiting on someone,
+    grey = nothing collected yet."""
+    from .grading import active_grade, gradable_answers
+
+    answers = gradable_answers(db, row["id"])
+    discarded = db.execute(
+        "SELECT COUNT(*) AS n FROM answers WHERE case_id = ? "
+        "AND status = 'discarded'", (row["id"],)
+    ).fetchone()["n"]
+    if discarded:
+        return "wait", "{} re-run(s) needed".format(discarded)
+    if not answers:
+        return "idle", "no answers yet"
+    assignment = db.execute(
+        "SELECT id FROM grading_assignments WHERE grader_id = ? "
+        "AND case_id = ?", (row["owner_id"], row["id"]),
+    ).fetchone()
+    graded = 0
+    if assignment is not None:
+        for answer in answers:
+            grade = active_grade(db, assignment["id"], answer["id"])
+            if grade is not None and grade["score"] is not None:
+                graded += 1
+    if graded < len(answers):
+        return "wait", "grading {}/{}".format(graded, len(answers))
+    return "good", "graded {0}/{0}".format(len(answers))
+
+
 @bp.route("/cases")
 @login_required
 def my_cases():
@@ -320,6 +350,7 @@ def my_cases():
     for row in rows:
         entry = dict(row)
         entry["rubric_items"] = len(json.loads(row["rubric"]))
+        entry["status_kind"], entry["status_text"] = case_status(db, row)
         cases.append(entry)
     return render_template("cases.html", cases=cases)
 
