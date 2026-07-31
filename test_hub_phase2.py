@@ -120,7 +120,7 @@ class HubPhase2Tests(unittest.TestCase):
             "llm_id": ["testmodel", "claude"], "assignee": "me",
             "mode": "missing",
         }, follow_redirects=True)
-        self.assertIn(b"Created 2 run job(s)", response.data)
+        self.assertIn(b"Created 2 run(s)", response.data)
         db = connect(self.app.config["DATABASE"])
         jobs = {
             json.loads(row["llm_ids"])[0]: json.loads(row["case_ids"])
@@ -158,7 +158,7 @@ class HubPhase2Tests(unittest.TestCase):
         response = self.client.post("/runs", data={
             "llm_id": ["testmodel"], "assignee": "me", "mode": "missing",
         }, follow_redirects=True)
-        self.assertIn(b"Created 1 run job(s)", response.data)
+        self.assertIn(b"Created 1 run(s)", response.data)
         db = connect(self.app.config["DATABASE"])
         row = db.execute("SELECT * FROM run_jobs").fetchone()
         db.close()
@@ -262,7 +262,7 @@ class HubPhase2Tests(unittest.TestCase):
             "llm_model": [str(i) for i in ids], "assignee": "me",
             "mode": "missing",
         }, follow_redirects=True)
-        self.assertIn(b"Created 1 run job(s)", response.data)
+        self.assertIn(b"Created 1 run(s)", response.data)
         self.assertIn(b"Already fully answered", response.data)
         db = connect(self.app.config["DATABASE"])
         job = db.execute("SELECT * FROM run_jobs").fetchone()

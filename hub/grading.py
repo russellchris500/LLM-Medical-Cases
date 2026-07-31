@@ -441,8 +441,8 @@ def discard_answer(case_id, label):
     ).rowcount
     db.commit()
     message = ("Answer {} of case {} was discarded ({}). Re-run that case "
-               "on the Run jobs page - the fresh answer will take the same "
-               "letter and come back for grading.".format(
+               "on the Ask the AIs page - the fresh answer will take the "
+               "same letter and come back for grading.".format(
                    label.upper(), case_id, reason))
     if superseded:
         message += " {} existing grade(s) on it were set aside.".format(superseded)

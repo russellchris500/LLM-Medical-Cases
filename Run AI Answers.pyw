@@ -1,4 +1,4 @@
-"""Double-click launcher for the Hub Runner (no console window)."""
+"""Double-click launcher for Run AI Answers (no console window)."""
 import os
 import sys
 

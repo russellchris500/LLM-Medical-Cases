@@ -91,7 +91,7 @@ class PiAsGraderTests(unittest.TestCase):
         response = self.client.post("/runs", data={
             "case_id": ["G002-001"], "llm_id": ["testmodel"], "assignee": "me",
         }, follow_redirects=True)
-        self.assertIn(b"Run job created", response.data)
+        self.assertIn(b"Run created", response.data)
         jobs = self.client.get(
             "/api/runner/jobs",
             headers={"Authorization": "Bearer " + self.pi_token},

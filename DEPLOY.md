@@ -183,7 +183,7 @@ Each person who runs LLMs (the PI, and any grader with their own API
 keys or site logins):
 
 1. Sign into the hub -> **Runner tokens** -> create a token (shown once).
-2. On their computer, double-click **Run Hub Jobs.pyw**, paste the hub
+2. On their computer, double-click **Run AI Answers.pyw**, paste the hub
    address and the token, Save.
 3. API keys and browser-site logins are set up exactly as before, in the
    classic Runner's Settings - they never leave that computer.

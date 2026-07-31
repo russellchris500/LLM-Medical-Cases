@@ -21,7 +21,7 @@ The framework consists of six programs, run in sequence:
 > snapshots. The PI can wear both hats: their first **New case** click
 > also makes them a grader, with the same blinding as everyone else.
 > LLMs are still executed by the local **Hub Runner** program
-> (`Run Hub Jobs.pyw`) because the browser-site models need a real browser
+> (`Run AI Answers.pyw`) because the browser-site models need a real browser
 > and personal logins; API keys and site credentials never leave the
 > runner's computer. `python -m hub.manage import-legacy` moves an
 > existing desktop-programs study into the hub. The desktop programs below

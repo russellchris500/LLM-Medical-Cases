@@ -30,9 +30,9 @@
     {% if counts['open_jobs'] %}
       <a class="action" href="{{ url_for('home.help_page') }}#running">
         <div class="num">{{ counts['open_jobs'] }}</div>
-        <div class="what">job{{ '' if counts['open_jobs'] == 1 else 's' }}
+        <div class="what">run{{ '' if counts['open_jobs'] == 1 else 's' }}
           waiting for your computer</div>
-        <div class="why">Open "Run Hub Jobs" on your own computer to run
+        <div class="why">Open "Run AI Answers" on your own computer to start
           {{ 'it' if counts['open_jobs'] == 1 else 'them' }} - answers upload
           by themselves.</div>
       </a>

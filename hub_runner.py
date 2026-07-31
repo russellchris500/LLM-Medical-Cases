@@ -1,12 +1,12 @@
-"""The Hub Runner: runs Study Hub jobs on this computer.
+"""Run AI Answers: runs the study website's runs on this computer.
 
-Double-click "Run Hub Jobs.pyw". The program signs into the hub with the
-runner token from Settings, lists the run jobs assigned to you (your own
-jobs, or - for the PI - jobs graders sent over), and runs them with the
-exact same machinery as the classic Runner: API models in parallel,
-browser sites in a visible window with you nearby. Every answer is
-uploaded the moment it is captured, so an interrupted job resumes where
-it stopped.
+Double-click "Run AI Answers.pyw". The program signs into the website
+with the token from its "Connect my computer" page, lists the runs
+waiting for you (your own, or - for the PI - runs graders sent over),
+and executes them with the exact same machinery as the classic Runner:
+API models in parallel, browser sites in a visible window with you
+nearby. Every answer is uploaded the moment it is captured, so an
+interrupted run resumes where it stopped.
 
 API keys and site logins stay in settings.json on THIS computer - only
 questions come down and answers go up.
@@ -112,7 +112,7 @@ def job_models(job, settings, log):
         if model_name:
             if (entry["kind"] == "browser" and entry["model_name"]
                     and entry["model_name"] != model_name):
-                log("  NOTE: this job asks {} for model '{}', but this "
+                log("  NOTE: this run asks {} for model '{}', but this "
                     "Runner's Settings say '{}'. Set the SITE'S OWN model "
                     "picker to '{}' before running - the answers are "
                     "recorded under that name.".format(
@@ -153,7 +153,7 @@ def run_job(job, settings, ui):
 
     models = job_models(job, settings, ui.log)
     if not models:
-        ui.log("  Nothing this Runner can do for job #{}.".format(job["id"]))
+        ui.log("  Nothing this computer can do for run #{}.".format(job["id"]))
         return 0, 0, 0
     case_ids = sorted(master.cases)
     todo, skipped, failed_pairs, changed_pairs = build_worklist(
@@ -185,21 +185,21 @@ def run_job(job, settings, ui):
 def finish_job(job, settings, ok, failed, uploads_failed, ui):
     client = hub_client_from(settings)
     if uploads_failed:
-        ui.log("Job #{} stays open: {} upload(s) failed - run it again to "
+        ui.log("Run #{} stays open: {} upload(s) failed - start it again to "
                "retry.".format(job["id"], uploads_failed))
         return
     if ok and not failed:
         client.set_job_status(job["id"], "done", "{} answers".format(ok))
-        ui.log("Job #{} is done ({} answers uploaded).".format(job["id"], ok))
+        ui.log("Run #{} is done ({} answers uploaded).".format(job["id"], ok))
     elif ok:
         client.set_job_status(
             job["id"], "done", "{} answers, {} failed".format(ok, failed)
         )
-        ui.log("Job #{} finished with {} failure(s) - the failed pairs are "
-               "recorded on the hub.".format(job["id"], failed))
+        ui.log("Run #{} finished with {} failure(s) - the failed pairs are "
+               "recorded on the website.".format(job["id"], failed))
     else:
         client.set_job_status(job["id"], "failed", "no answers collected")
-        ui.log("Job #{} produced no answers - marked failed on the hub.".format(
+        ui.log("Run #{} produced no answers - marked failed on the website.".format(
             job["id"]
         ))
 
@@ -212,7 +212,7 @@ def main():
     from tkinter import messagebox
     import gui_common
 
-    root = gui_common.make_root("Hub Runner (runs Study Hub jobs)", 900, 620)
+    root = gui_common.make_root("Run AI Answers (runs from the study website)", 900, 620)
     settings = SettingsStore.load_or_create()
     hub = settings.data.setdefault("hub", {"url": "", "token": ""})
 
@@ -237,7 +237,7 @@ def main():
 
     middle = tk.Frame(root)
     middle.pack(fill="both", expand=True, padx=8, pady=8)
-    tk.Label(middle, text="Run jobs waiting for this Runner:", anchor="w").pack(
+    tk.Label(middle, text="Runs waiting for this computer:", anchor="w").pack(
         fill="x"
     )
     jobs_list = tk.Listbox(middle, height=8)
@@ -265,21 +265,21 @@ def main():
                 job["id"], len(job["cases"]), ", ".join(job["llm_ids"]),
                 job["requested_by"],
             ))
-        log.log("{} open job(s).".format(len(jobs)))
+        log.log("{} run(s) waiting.".format(len(jobs)))
 
     def run_selected():
         if task.running:
-            messagebox.showinfo("Busy", "A job is already running.", parent=root)
+            messagebox.showinfo("Busy", "A run is already going.", parent=root)
             return
         selection = jobs_list.curselection()
         if not selection:
-            messagebox.showinfo("Nothing selected", "Click a job first.",
+            messagebox.showinfo("Nothing selected", "Click a run first.",
                                 parent=root)
             return
         job = current_jobs[selection[0]]
 
         def work(ui):
-            ui.log("Running job #{}...".format(job["id"]))
+            ui.log("Starting run #{}...".format(job["id"]))
             ok, failed, uploads_failed = run_job(job, settings, ui)
             finish_job(job, settings, ok, failed, uploads_failed, ui)
 
@@ -302,8 +302,8 @@ def main():
 
     task.start = start_capturing_ui
 
-    tk.Button(buttons, text="Refresh jobs", command=refresh_jobs).pack(side="left")
-    tk.Button(buttons, text="Run the selected job", command=run_selected).pack(
+    tk.Button(buttons, text="Refresh runs", command=refresh_jobs).pack(side="left")
+    tk.Button(buttons, text="Start the selected run", command=run_selected).pack(
         side="left", padx=6
     )
     tk.Button(buttons, text="Stop", command=stop).pack(side="left")

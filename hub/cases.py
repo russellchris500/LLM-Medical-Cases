@@ -408,7 +408,7 @@ def edit_summary(case_id, info):
         message = "Saved case {}.".format(case_id)
     if info["answers_discarded"]:
         message += (" {} answer(s) were discarded because the question "
-                    "changed - re-run them from the Run jobs page."
+                    "changed - re-run them from the Ask the AIs page."
                     .format(info["answers_discarded"]))
     return message
 

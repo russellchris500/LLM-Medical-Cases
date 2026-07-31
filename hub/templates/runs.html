@@ -6,7 +6,7 @@
 <div class="card">
   <h1>Discarded during grading - needs a re-run</h1>
   <p class="hint">These answers were judged incomplete (usually a bad
-  browser capture) or the case's question changed. Create a run job below
+  browser capture) or the case's question changed. Start a new run below
   for the case with that model; the fresh answer replaces the old one
   under the same letter and comes back for grading.</p>
   <table>
@@ -82,7 +82,7 @@
          Run all unanswered cases</button>
        <button class="btn secondary" type="submit">
          Run only the ticked cases</button></p>
-    <p class="hint">Then open <b>Run Hub Jobs</b> on that computer - answers
+    <p class="hint">Then open <b>Run AI Answers</b> on that computer - answers
     upload to this site by themselves.
     <a href="{{ url_for('home.help_page') }}#running">How running works</a> &middot;
     <a href="{{ url_for('runner_api.runner_tokens') }}">Connect my computer</a></p>
@@ -114,10 +114,10 @@
 {% endif %}
 
 <div class="card">
-  <h1>{{ 'All run jobs' if user['role'] == 'pi' else 'My run jobs' }}</h1>
+  <h1>{{ 'All runs (everyone)' if user['role'] == 'pi' else 'My runs' }}</h1>
   {% if user['role'] == 'pi' %}
-    <p class="hint">Jobs assigned to you appear in your local Run Hub Jobs
-    program - run them there; answers upload automatically.</p>
+    <p class="hint">Runs sent to you appear in the Run AI Answers program
+    on your computer - start them there; answers upload automatically.</p>
   {% endif %}
   {% if jobs %}
   <table>
@@ -148,7 +148,7 @@
     </tr>
     {% endfor %}
   </table>
-  {% else %}<p>No run jobs yet - create one above and the answers flow
+  {% else %}<p>No runs yet - start one above and the answers flow
     straight into grading.</p>{% endif %}
 </div>
 {% endblock %}

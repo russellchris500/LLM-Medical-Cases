@@ -207,8 +207,8 @@ def run_jobs():
                         covered.append(label)
                 db.commit()
                 if created:
-                    message = ("Created {} run job(s) covering the unanswered "
-                               "cases: {}. {} local Runner will run "
+                    message = ("Created {} run(s) covering the unanswered "
+                               "cases: {}. {} computer runs "
                                "{}.".format(
                                    len(created), "; ".join(created),
                                    "The PI's" if send_to_pi else "Your",
@@ -241,11 +241,12 @@ def run_jobs():
                 )
                 db.commit()
                 flash(
-                    "Run job created - {} Answers upload to this site "
+                    "Run created - {} Answers upload to this site "
                     "automatically and go straight into grading.".format(
                         "the PI's computer runs it next."
                         if send_to_pi else
-                        "now open 'Run Hub Jobs' on your computer and run it."
+                        "now open 'Run AI Answers' on your computer and "
+                        "start it."
                     )
                 )
                 return redirect(url_for("runs.run_jobs"))
@@ -342,7 +343,7 @@ def remove_model(model_id):
     db = get_db()
     db.execute("UPDATE llm_models SET active = 0 WHERE id = ?", (model_id,))
     db.commit()
-    flash("Model hidden from the run-job lists (existing jobs and "
+    flash("Model hidden from the pick lists (existing runs and "
           "answers are untouched).")
     return redirect(url_for("runs.run_jobs"))
 
@@ -362,5 +363,5 @@ def cancel_job(job_id):
             (now_iso(), job_id),
         )
         db.commit()
-        flash("Cancelled run job #{}.".format(job_id))
+        flash("Cancelled run #{}.".format(job_id))
     return redirect(url_for("runs.run_jobs"))
