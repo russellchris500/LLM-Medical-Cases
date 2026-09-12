@@ -1,0 +1,176 @@
+{% extends "layout.html" %}
+{% block title %}Judge {{ config['name'] }}{% endblock %}
+{% block content %}
+{% if running %}<meta http-equiv="refresh" content="5">{% endif %}
+<div class="card">
+  <h1>{{ config['name'] }}
+    <span class="hint" style="font-weight:normal">{{ display }} - judge
+    version {{ config['version'] }}, prompt v{{ config['prompt_version'] }}</span></h1>
+  <p class="hint">Self-judging: {{ policy_label }}.
+    {{ 'Self-identifying phrases are hidden from the judge.' if config['redact_self_id'] else 'Answers are shown as-is.' }}
+    {{ 'Deep thinking on.' if config['deep_thinking'] else 'Deep thinking off.' }}
+    {% if config['extra_instructions'] %}<br>Extra instructions:
+      <i>{{ config['extra_instructions'] }}</i>{% endif %}</p>
+  {% if not has_key %}
+    <div class="error">No API key is saved for this judge's provider -
+      add it on the <a href="{{ url_for('judge.overview') }}">AI judge</a> page.</div>
+  {% endif %}
+  <form method="post" style="display:inline">
+    <input type="hidden" name="action" value="validate">
+    <button class="btn" type="submit" {% if running %}disabled{% endif %}>
+      Test against the manual grades</button>
+  </form>
+  <form method="post" style="display:inline">
+    <input type="hidden" name="action" value="retest">
+    <input type="hidden" name="redo_all" value="1">
+    <button class="btn secondary" type="submit" {% if running %}disabled{% endif %}>
+      Re-test everything from scratch</button>
+  </form>
+  <form method="post" style="display:inline">
+    <input type="hidden" name="action" value="judge_all">
+    <button class="btn secondary" type="submit" {% if running %}disabled{% endif %}>
+      Judge every answer (incl. ungraded)</button>
+  </form>
+  <a class="btn secondary" href="{{ url_for('judge.edit_config', config_id=config['id']) }}">Edit judge</a>
+  <p class="hint">"Test" judges answers that carry a physician grade and
+  have no current verdict yet - after a rubric or judge edit that is
+  exactly the stale set, so it doubles as <b>Re-test</b>. "Re-test from
+  scratch" discards nothing but re-judges all of them (useful to see how
+  consistent the judge is). "Judge every answer" also covers answers no
+  physician has graded - those verdicts are only used if the judge is
+  approved below.</p>
+</div>
+
+<div class="card">
+  <h1>Validation against the physicians' grades</h1>
+  {% if report['compared'] %}
+    <p><span class="chip {{ 'good' if report['rate'] == 100 else 'wait' }}"
+        style="font-size:1rem">Accepted on {{ report['accepted'] }} of
+        {{ report['compared'] }} manually graded answers
+        ({{ report['rate'] }}%)</span>
+      &nbsp; <span class="hint">same 0/1/2 score on {{ report['score_agree'] }}
+      of {{ report['compared'] }}{% if report['humans_disagree'] %};
+      the physicians themselves disagreed on {{ report['humans_disagree'] }}
+      of them{% endif %}.</span></p>
+    {% if report['split']['self']['compared'] %}
+      <p class="hint">Self-judged answers (same vendor as the judge):
+        accepted {{ report['split']['self']['accepted'] }} of
+        {{ report['split']['self']['compared'] }}; other vendors:
+        {{ report['split']['other']['accepted'] }} of
+        {{ report['split']['other']['compared'] }}. A gap here is
+        self-preference bias.</p>
+    {% endif %}
+  {% else %}
+    <p>No verdict has been compared with a physician grade yet.</p>
+  {% endif %}
+  <p class="hint">
+    {% if report['stale'] %}<b>{{ report['stale'] }} verdict(s) are stale</b>
+      (made under an earlier rubric or judge version) - click Test to
+      re-judge them. {% endif %}
+    {% if report['errors'] %}{{ report['errors'] }} verdict(s) failed (see
+      the runs below). {% endif %}
+    {% if report['skipped_self'] %}{{ report['skipped_self'] }} answer(s) were
+      skipped under the self-judging policy. {% endif %}
+    {% if report['unvalidated'] %}{{ report['unvalidated'] }} verdict(s) are
+      on answers no physician has graded yet. {% endif %}
+  </p>
+
+  {% if report['items'] %}
+  <h1 style="margin-top:16px">Rubric items where the judge and the physicians differ</h1>
+  <p class="hint">"Judge lenient" = the judge said Covered where a physician
+  said Missed; "judge strict" = the reverse. An item that is mostly wrong in
+  one direction is usually a wording problem: sharpen it on the case's edit
+  page and click Test again - the physicians' judgments carry over, only the
+  judge is re-run.</p>
+  <table>
+    <tr><th>Case</th><th>Rubric item</th><th>Compared</th><th>Agree</th>
+        <th>Judge lenient</th><th>Judge strict</th></tr>
+    {% for item in report['items'] if item['lenient'] or item['strict'] %}
+      <tr><td><a href="{{ url_for('cases.edit_case', case_id=item['case_id']) }}">{{ item['case_id'] }}</a></td>
+          <td>{{ item['index'] + 1 }}. {{ item['text'] }}</td>
+          <td>{{ item['n'] }}</td><td>{{ item['agree'] }}</td>
+          <td>{{ item['lenient'] or '' }}</td><td>{{ item['strict'] or '' }}</td></tr>
+    {% else %}
+      <tr><td colspan="6">Every compared item agreed.</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  {% if report['mismatches'] %}
+  <h1 style="margin-top:16px">Rejected verdicts ({{ report['mismatches']|length }})</h1>
+  <table>
+    <tr><th>Case</th><th>Answer</th><th>Score judge / physicians</th><th>Items that differ</th></tr>
+    {% for m in report['mismatches'] %}
+      <tr><td>{{ m['case_id'] }}</td>
+          <td><a href="{{ url_for('judge.verdict_page', verdict_id=m['verdict_id']) }}">#{{ m['answer_id'] }}</a>
+            {% if m['self_judged'] %}<span class="chip wait">self</span>{% endif %}</td>
+          <td>{{ m['judge_score'] }} / {{ m['human_scores']|join(', ') }}</td>
+          <td>{% for d in m['details'] %}
+            <div><b>{{ d['index'] + 1 }}.</b> judge {{ 'Covered' if d['judge'] else 'Missed' }},
+              {{ d['grader'] }} {{ 'Covered' if d['human'] else 'Missed' }}
+              {% if d['evidence'] %}<span class="hint">- "{{ d['evidence'] }}"</span>{% endif %}
+              {% if d['reason'] %}<span class="hint">- {{ d['reason'] }}</span>{% endif %}</div>
+          {% endfor %}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h1>Use for scoring</h1>
+  <form method="post">
+    <input type="hidden" name="action" value="approve">
+    <p><label style="font-weight:normal;margin:0">
+      <input type="checkbox" name="approved" {% if config['approved_for_scoring'] %}checked{% endif %}>
+      Approved: this judge's verdicts may stand in for a physician grade on
+      answers nobody has graded (reported separately, never mixed into the
+      physicians' ranking)</label></p>
+    <button class="btn secondary" type="submit">Save</button>
+  </form>
+  {% if ranking %}
+    <h1 style="margin-top:16px">Ranking by this judge alone</h1>
+    <p class="hint">{{ ranking['matches'] }} verdicts, current rubric and
+    judge version only. Compare with the physicians'
+    <a href="{{ url_for('rankings.rankings_page') }}">Rankings</a>.</p>
+    <table>
+      <tr><th>Rank</th><th>Model</th><th>Elo</th><th>Judged</th><th>Avg</th>
+          <th>Self-judged</th><th>Win vs avg case</th></tr>
+      {% for row in ranking['llms'] %}
+        <tr><td>{{ row['rank'] }}</td><td>{{ row['display'] }}</td>
+            <td>{{ row['elo'] }}</td><td>{{ row['n'] }}</td>
+            <td>{{ row['average'] }}</td><td>{{ row['self'] or '' }}</td>
+            <td>{{ row['win_vs_average'] }}%</td></tr>
+      {% endfor %}
+    </table>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h1>Runs</h1>
+  {% if runs %}
+  <table>
+    <tr><th>#</th><th>Scope</th><th>Status</th><th>Progress</th><th>Note</th><th></th></tr>
+    {% for run in runs %}
+      <tr><td>{{ run['id'] }}</td>
+          <td>{{ 'graded answers' if run['scope'] == 'validation' else 'every answer' }}{{ '' if run['only_missing'] else ' (from scratch)' }}</td>
+          <td><span class="chip {{ 'good' if run['status'] == 'done' else ('wait' if run['status'] in ('queued', 'running', 'stopping') else 'idle') }}">{{ run['status'] }}</span></td>
+          <td>{{ run['progress_done'] }} / {{ run['progress_total'] }}</td>
+          <td class="hint">{{ run['note'] }} <span style="white-space:nowrap">({{ run['starter'] }},
+            {{ run['created_at'][:16].replace('T', ' ') }})</span></td>
+          <td>{% if run['status'] in ('queued', 'running') %}
+            <form method="post" action="{{ url_for('judge.stop_run', run_id=run['id']) }}">
+              <button class="btn secondary" type="submit">Stop</button></form>
+          {% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="hint">If the site is restarted mid-run, re-queue it from the
+  command line: <code>python -m hub.manage judge-run {{ runs[0]['id'] }}</code>
+  (finished verdicts are kept).</p>
+  {% else %}<p>No runs yet.</p>{% endif %}
+  <form method="post" style="margin-top:10px"
+        onsubmit="return confirm('Archive this judge? Its verdicts are kept but it disappears from the list.');">
+    <input type="hidden" name="action" value="archive">
+    <button class="btn secondary" type="submit">Archive this judge</button>
+  </form>
+</div>
+{% endblock %}

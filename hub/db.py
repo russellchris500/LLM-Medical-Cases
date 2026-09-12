@@ -209,7 +209,81 @@ CREATE TABLE IF NOT EXISTS llm_models (
 );
 """
 
-# Future additive changes: append ("0008", "ALTER TABLE ...") entries.
+# The AI judge (hub/judge.py): judge definitions, their API keys, runs,
+# and every verdict, each pinned to the rubric and judge version it was
+# made under so rubric edits and judge edits make old verdicts stale.
+SCHEMA_0008 = """
+CREATE TABLE IF NOT EXISTS judge_api_keys (
+    llm_id TEXT PRIMARY KEY,
+    api_key TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS judge_configs (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    llm_id TEXT NOT NULL,                  -- claude / gpt / gemini / grok / testjudge
+    model_name TEXT NOT NULL,
+    self_policy TEXT NOT NULL DEFAULT 'skip_same_vendor'
+        CHECK (self_policy IN ('skip_same_vendor', 'skip_same_model', 'allow')),
+    redact_self_id INTEGER NOT NULL DEFAULT 1,
+    deep_thinking INTEGER NOT NULL DEFAULT 1,
+    extra_instructions TEXT NOT NULL DEFAULT '',
+    prompt_version INTEGER NOT NULL DEFAULT 1,
+    version INTEGER NOT NULL DEFAULT 1,    -- bumps on any change that alters verdicts
+    approved_for_scoring INTEGER NOT NULL DEFAULT 0,
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    archived INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS judge_runs (
+    id INTEGER PRIMARY KEY,
+    config_id INTEGER NOT NULL REFERENCES judge_configs(id),
+    started_by INTEGER NOT NULL REFERENCES users(id),
+    scope TEXT NOT NULL DEFAULT 'validation'
+        CHECK (scope IN ('validation', 'all')),
+    only_missing INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued', 'running', 'stopping', 'done',
+                          'failed', 'stopped')),
+    note TEXT NOT NULL DEFAULT '',
+    progress_done INTEGER NOT NULL DEFAULT 0,
+    progress_total INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS judge_verdicts (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL REFERENCES judge_runs(id),
+    config_id INTEGER NOT NULL REFERENCES judge_configs(id),
+    config_version INTEGER NOT NULL,
+    answer_id INTEGER NOT NULL REFERENCES answers(id),
+    case_id TEXT NOT NULL REFERENCES cases(id),
+    rubric_version INTEGER NOT NULL,
+    rubric_snapshot TEXT NOT NULL,         -- JSON list of items judged
+    rubric_results TEXT NOT NULL DEFAULT '[]',  -- JSON list of booleans
+    unnecessary_risk INTEGER,
+    poor_approach INTEGER,
+    score INTEGER CHECK (score IN (0, 1, 2)),
+    rationale TEXT NOT NULL DEFAULT '{}',  -- JSON: per-item evidence + reasons
+    raw_response TEXT NOT NULL DEFAULT '',
+    judge_variant_id TEXT NOT NULL,
+    judge_model_reported TEXT NOT NULL DEFAULT '',
+    self_judged INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'ok'
+        CHECK (status IN ('ok', 'skipped_self', 'error')),
+    error TEXT NOT NULL DEFAULT '',
+    superseded INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS judge_verdicts_one_active
+    ON judge_verdicts (config_id, answer_id) WHERE superseded = 0;
+"""
+
+# Future additive changes: append ("0009", "ALTER TABLE ...") entries.
 MIGRATIONS = [
     ("0001", SCHEMA),
     ("0002", SCHEMA_0002),
@@ -218,6 +292,7 @@ MIGRATIONS = [
     ("0005", SCHEMA_0005),
     ("0006", SCHEMA_0006),
     ("0007", SCHEMA_0007),
+    ("0008", SCHEMA_0008),
 ]
 
 

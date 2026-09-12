@@ -1,0 +1,117 @@
+{% extends "layout.html" %}
+{% block title %}AI judge{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>AI judge - an LLM grader, trusted only where it matches you</h1>
+  <p>A judge is one AI model plus the study's grading prompt. It sees what
+  a human grader sees (case, rubric, blinded answer text) and returns the
+  same Covered / Missed judgments plus the risk and approach questions;
+  the 0/1/2 score is computed by the same rule. Every verdict on an answer
+  a physician has graded is checked <b>item by item</b> against that grade:
+  a verdict is <b>accepted only when every rubric item matches every
+  physician's judgment</b> on that answer. Agreeing on the final score by
+  accident is not enough.</p>
+  <p class="hint">{{ graded_answers }} answer{{ '' if graded_answers == 1 else 's' }}
+  currently carr{{ 'ies' if graded_answers == 1 else 'y' }} a complete
+  physician grade under the current rubric - that is the validation set.
+  Edit a rubric (My cases) or a judge's settings and the affected verdicts
+  become stale; <b>Re-test</b> judges only those again.</p>
+</div>
+
+<div class="card">
+  <h1>Judges</h1>
+  {% if configs %}
+  <table>
+    <tr><th>Judge</th><th>Self-judging</th><th>Validated</th>
+        <th>Accepted</th><th>Needs attention</th><th>Scoring</th></tr>
+    {% for c in configs %}
+    <tr>
+      <td><a href="{{ url_for('judge.config_page', config_id=c['id']) }}">{{ c['name'] }}</a>
+        <div class="hint">{{ c['display'] }} - judge version {{ c['version'] }}
+          {% if c['running'] %}<span class="chip wait">running</span>{% endif %}</div></td>
+      <td class="hint">{{ c['self_policy'].replace('_', ' ') }}</td>
+      <td>{{ c['report']['compared'] }} compared</td>
+      <td>{% if c['report']['rate'] is not none %}
+            <span class="chip {{ 'good' if c['report']['rate'] == 100 else 'wait' }}">
+              {{ c['report']['accepted'] }} / {{ c['report']['compared'] }}
+              ({{ c['report']['rate'] }}%)</span>
+          {% else %}<span class="chip idle">not tested yet</span>{% endif %}</td>
+      <td class="hint">
+        {% if c['report']['stale'] %}{{ c['report']['stale'] }} stale{% endif %}
+        {% if c['report']['errors'] %} {{ c['report']['errors'] }} errors{% endif %}
+        {% if not c['report']['stale'] and not c['report']['errors'] %}-{% endif %}</td>
+      <td>{% if c['approved_for_scoring'] %}<span class="chip good">approved</span>
+          {% else %}<span class="chip idle">validation only</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+    <p>No judge yet - create one below, then test it against the manual grades.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h1>New judge</h1>
+  <form method="post">
+    <input type="hidden" name="action" value="new_config">
+    <label for="llm_id">Which AI judges</label>
+    <select name="llm_id" id="llm_id">
+      {% for llm_id, label in judge_choices %}
+        <option value="{{ llm_id }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+    <label for="model_name">Exact model name</label>
+    <input type="text" name="model_name" id="model_name"
+           placeholder="e.g. {{ providers[0][2] }}">
+    <p class="hint">Recorded on every verdict. A different model name is a
+    different judge - the same rule as for the AIs being ranked. For the
+    keyword test judge type anything (e.g. <code>v1</code>).</p>
+    <label for="name">Name (optional)</label>
+    <input type="text" name="name" id="name" placeholder="e.g. Claude judge, strict wording">
+    <label>Self-judging policy</label>
+    {% for value, label in policies %}
+      <p style="margin:4px 0"><label style="font-weight:normal;margin:0">
+        <input type="radio" name="self_policy" value="{{ value }}"
+          {% if loop.first %}checked{% endif %}> {{ label }}</label></p>
+    {% endfor %}
+    <p class="hint">A model grading its own vendor's answers is a known
+    bias. Vendors: Anthropic (Claude), OpenAI (GPT, ChatGPT for Clinicians,
+    GPT-OSS), Google (Gemini), xAI (Grok). Medical sites with undisclosed
+    backends are never treated as "self".</p>
+    <p style="margin:8px 0"><label style="font-weight:normal;margin:0">
+      <input type="checkbox" name="redact_self_id" checked> Hide self-identifying
+      phrases in answers ("As ChatGPT, ...") from the judge</label></p>
+    <p style="margin:8px 0"><label style="font-weight:normal;margin:0">
+      <input type="checkbox" name="deep_thinking" checked> Ask the judge to
+      think deeply before answering</label></p>
+    <label for="extra_instructions">Extra grading instructions (optional)</label>
+    <textarea name="extra_instructions" id="extra_instructions"
+      placeholder="Study-specific conventions, e.g. 'An item asking for a test is covered only if the answer orders it, not if it merely lists it as an option.'"></textarea>
+    <p><button class="btn" type="submit">Create the judge</button></p>
+  </form>
+</div>
+
+<div class="card">
+  <h1>API keys for judges</h1>
+  <p class="hint">Stored on this server only, used only for judging. Keys
+  for running the AIs on cases stay in each person's Run AI Answers program.</p>
+  <table>
+    <tr><th>Provider</th><th>Key</th></tr>
+    {% for llm_id, label, default_model in providers %}
+      <tr><td>{{ label }}</td>
+          <td>{% if keys[llm_id] %}saved (ends in {{ keys[llm_id] }}){% else %}
+              <span class="chip idle">none</span>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  <form method="post" style="margin-top:10px">
+    <input type="hidden" name="action" value="save_key">
+    <select name="llm_id">
+      {% for llm_id, label, default_model in providers %}
+        <option value="{{ llm_id }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+    <input type="password" name="api_key" style="width:50%" placeholder="paste the API key">
+    <button class="btn secondary" type="submit">Save key</button>
+  </form>
+</div>
+{% endblock %}

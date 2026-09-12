@@ -1,0 +1,39 @@
+{% extends "layout.html" %}
+{% block title %}Edit judge{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Edit judge - {{ display }}</h1>
+  <p class="hint">Changing the model, policy, redaction, thinking, or the
+  extra instructions makes every existing verdict stale (a different judge
+  gave them); the judge version goes up and Re-test judges again. Renaming
+  changes nothing.</p>
+  <form method="post">
+    <label for="name">Name</label>
+    <input type="text" name="name" id="name" value="{{ config['name'] }}">
+    <label for="model_name">Exact model name</label>
+    <input type="text" name="model_name" id="model_name" value="{{ config['model_name'] }}">
+    <label>Self-judging policy</label>
+    {% for value, label in policies %}
+      <p style="margin:4px 0"><label style="font-weight:normal;margin:0">
+        <input type="radio" name="self_policy" value="{{ value }}"
+          {% if config['self_policy'] == value %}checked{% endif %}> {{ label }}</label></p>
+    {% endfor %}
+    <p style="margin:8px 0"><label style="font-weight:normal;margin:0">
+      <input type="checkbox" name="redact_self_id" {% if config['redact_self_id'] %}checked{% endif %}>
+      Hide self-identifying phrases from the judge</label></p>
+    <p style="margin:8px 0"><label style="font-weight:normal;margin:0">
+      <input type="checkbox" name="deep_thinking" {% if config['deep_thinking'] %}checked{% endif %}>
+      Ask the judge to think deeply</label></p>
+    <label for="extra_instructions">Extra grading instructions</label>
+    <textarea name="extra_instructions" id="extra_instructions">{{ config['extra_instructions'] }}</textarea>
+    <p><button class="btn" type="submit">Save</button>
+       <a class="btn secondary" href="{{ url_for('judge.config_page', config_id=config['id']) }}">Cancel</a></p>
+  </form>
+</div>
+<div class="card">
+  <details class="advanced">
+    <summary>The fixed part of the grading prompt (prompt v{{ config['prompt_version'] }})</summary>
+    <pre style="white-space:pre-wrap;font-size:0.85rem">{{ prompt }}</pre>
+  </details>
+</div>
+{% endblock %}

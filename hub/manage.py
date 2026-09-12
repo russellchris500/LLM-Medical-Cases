@@ -4,11 +4,16 @@
     python -m hub.manage create-pi "Dr Name" pi@example.org
     python -m hub.manage import-legacy grader@example.org [folder]
     python -m hub.manage make-grader email@example.org
+    python -m hub.manage judge-run RUN_ID
     python -m hub.manage run           (development server on port 5000)
 
 make-grader gives an account (typically the PI's) a grader number so it
 can author, run, and grade cases too - the same thing that happens
 automatically the first time the PI clicks New case.
+
+judge-run executes (or resumes) an AI-judge run in the foreground,
+printing progress - for runs the web process could not finish (a
+restart mid-run) or for very large runs. Finished verdicts are kept.
 
 import-legacy moves an existing desktop-programs study into the hub:
 cases from master_cases.json, collected answers (with their image
@@ -294,6 +299,44 @@ def main(argv=None):
         for line in report["skipped"]:
             print("Note: " + line)
         return 0
+
+    if command == "judge-run":
+        if len(argv) != 2 or not argv[1].isdigit():
+            print("Usage: python -m hub.manage judge-run RUN_ID")
+            return 1
+        from .judge import execute_run
+
+        db = connect(app.config["DATABASE"])
+        try:
+            run = db.execute(
+                "SELECT * FROM judge_runs WHERE id = ?", (int(argv[1]),)
+            ).fetchone()
+            if run is None:
+                print("No judge run with that id.")
+                return 1
+            if run["status"] not in ("queued", "running", "stopped",
+                                     "failed"):
+                print("Run {} is {} - nothing to do.".format(
+                    run["id"], run["status"]))
+                return 0
+            # A stopped/failed run resumes: only_missing skips what is done.
+            db.execute(
+                "UPDATE judge_runs SET status = 'queued', note = '' "
+                "WHERE id = ?", (run["id"],),
+            )
+            db.commit()
+        finally:
+            db.close()
+        execute_run(app.config["DATABASE"], int(argv[1]), log=print)
+        db = connect(app.config["DATABASE"])
+        try:
+            run = db.execute(
+                "SELECT * FROM judge_runs WHERE id = ?", (int(argv[1]),)
+            ).fetchone()
+        finally:
+            db.close()
+        print("Run {}: {}. {}".format(run["id"], run["status"], run["note"]))
+        return 0 if run["status"] == "done" else 1
 
     if command == "run":
         app.run(host="127.0.0.1", port=5000, debug=False)

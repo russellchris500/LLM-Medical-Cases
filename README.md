@@ -18,7 +18,8 @@ The framework consists of six programs, run in sequence:
 > rubric flags and fixes propagate instantly with targeted re-grading; the
 > **PI** fulfills run requests with their Runner and gets a live Elo
 > ranking dashboard (with inter-rater agreement) plus CSV export and
-> snapshots. The PI can wear both hats: their first **New case** click
+> snapshots, and can set up an **AI judge** - an LLM grader accepted only
+> where it matches the physicians' grades item by item (see below). The PI can wear both hats: their first **New case** click
 > also makes them a grader, with the same blinding as everyone else.
 > LLMs are still executed by the local **Hub Runner** program
 > (`Run AI Answers.pyw`) because the browser-site models need a real browser
@@ -202,6 +203,77 @@ the same LLM are ranked as separate entries, labeled with both (e.g.
 - Shows the LLM ranking (Elo, answers graded, average score, 2/1/0 counts)
   and a case-difficulty table, and exports `ranking_results/` CSVs
   (rankings, case difficulty, and every match for statistical analysis).
+
+## The AI judge (LLM-as-a-judge) - in the Study Hub
+
+The hub can let an LLM grade answers, but only as a *checked* stand-in
+for the physicians. The design rests on five rules.
+
+1. **The judge grades exactly like a human grader.** It receives what a
+   grader sees - the case text, the rubric, and the blinded answer text
+   (never the site HTML, never the model's name; self-identifying phrases
+   such as "As ChatGPT..." can be redacted first) - and must return the
+   same judgments: Covered / Missed for every rubric item with a verbatim
+   quote as evidence and a one-sentence reason, then the unnecessary-risk
+   and poor-approach questions. The 0/1/2 score is computed by the study's
+   own rule (`compute_score`), never by the model. Replies must be a JSON
+   object; an unreadable reply is asked for once more and then recorded
+   as an error, never guessed at.
+2. **Verification against the manual scores, item by item.** Every
+   verdict on an answer a physician has graded (under the current rubric
+   version) is compared with that grade. A verdict is **accepted only if
+   every rubric item matches every physician's judgment** on that answer.
+   Matching the final score is not enough: reaching 0 for the wrong item
+   is rejected. The judge page reports the acceptance rate, the same-score
+   rate, the answers on which the physicians themselves disagreed (the
+   judge cannot match both), a per-rubric-item table of disagreements
+   split into *judge lenient* (Covered where the physician said Missed)
+   and *judge strict*, and every rejected verdict with the judge's
+   evidence and reason beside the physician's judgment.
+3. **Rubrics change; retest with one click.** Verdicts record the rubric
+   version and the judge version they were made under. Editing a rubric
+   item (on the case's edit page, as always) or changing the judge's
+   model, instructions, or policy makes the affected verdicts *stale*:
+   they leave the report, and **Test against the manual grades** re-judges
+   exactly the stale and missing answers. The physicians' grades survive
+   rubric edits through the usual carry-over, so the loop "sharpen the
+   wording of the item the judge keeps misreading, re-test, read the
+   mismatches" costs nothing on the human side. Superseded verdicts are
+   kept for the record.
+4. **Which LLM judges is part of the result.** A judge is an (LLM, model
+   name) pair like any ranked model, plus its prompt version and extra
+   instructions; all of it is recorded on every verdict. Several judges
+   (different models, or the same model with different instructions) can
+   be validated side by side on the same manual grades.
+5. **Self-judging is a policy, not an accident.** A model grading its own
+   family's answers is a known bias, so each judge has a self-judging
+   policy: *skip answers from the judge's own vendor* (the default; Claude
+   is Anthropic, GPT / ChatGPT for Clinicians / GPT-OSS are OpenAI, Gemini
+   is Google, Grok is xAI; medical sites with undisclosed backends are
+   never treated as "self"), *skip only the exact same model*, or *judge
+   everything*. Under the last two, every same-vendor verdict is marked
+   self-judged and the report gives the acceptance rate for self-judged
+   and other answers separately, so the bias is measured rather than
+   assumed. Skipped answers are listed, not silently dropped.
+
+What the judge is used for: validation is the default and only purpose
+until the PI ticks **Approved for scoring** on a judge whose acceptance
+they find good enough. Even then its verdicts never enter the physicians'
+ranking: **Judge every answer** also covers answers nobody has graded, and
+the judge's verdicts are fitted into a *separate* ranking on the judge's
+page (same Elo method, current rubric and judge version only) for
+comparison with the physicians' Rankings.
+
+Mechanics: API keys for judging are saved on the hub (they are used only
+for judging; the keys that run the AIs on cases stay in each person's
+Runner as before). A run judges answers one by one in the background,
+saving each verdict as it arrives, with a Stop button; if the site is
+restarted mid-run, `python -m hub.manage judge-run RUN_ID` resumes it
+(finished verdicts are kept). A built-in keyword *test judge* needs no key
+and exercises the whole pipeline - it is deliberately naive, and watching
+validation reject it is a good first demonstration. Verdict pages
+identify answers by number, not by model, so a PI who also grades is not
+unblinded by reading the judge's reasoning.
 
 ## Data Formats
 

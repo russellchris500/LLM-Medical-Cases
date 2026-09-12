@@ -1,0 +1,68 @@
+{% extends "layout.html" %}
+{% block title %}Verdict on case {{ verdict['case_id'] }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Case {{ verdict['case_id'] }} - answer #{{ verdict['answer_id'] }}
+    <span class="hint" style="font-weight:normal">judged by {{ display }}
+      (judge version {{ verdict['config_version'] }}, rubric version
+      {{ verdict['rubric_version'] }})</span></h1>
+  <p>
+    {% if verdict['status'] == 'ok' %}
+      <span class="chip good">judge score {{ verdict['score'] }}</span>
+    {% elif verdict['status'] == 'skipped_self' %}
+      <span class="chip idle">skipped: self-judging policy</span>
+    {% else %}<span class="chip wait">error: {{ verdict['error'] }}</span>{% endif %}
+    {% if verdict['self_judged'] %}<span class="chip wait">self-judged (same vendor as the judge)</span>{% endif %}
+    {% if stale %}<span class="chip wait">stale - the rubric or the judge changed since</span>{% endif %}
+    {% for grade in grades %}
+      <span class="chip {{ 'good' if grade['score'] == verdict['score'] else 'wait' }}">{{ grade['grader'] }}: {{ grade['score'] }}</span>
+    {% endfor %}
+  </p>
+  <p class="hint">The answer is identified by its number, not the AI that
+  wrote it, so reading verdicts cannot unblind your own grading.</p>
+  <table>
+    <tr><th>Rubric item</th><th>Judge</th>
+      {% for grade in grades %}<th>{{ grade['grader'] }}</th>{% endfor %}
+      <th>Judge's evidence and reason</th></tr>
+    {% for row in rows %}
+      <tr><td>{{ loop.index }}. {{ row['text'] }}</td>
+          <td>{% if row['judge'] is none %}-{% else %}{{ 'Covered' if row['judge'] else 'Missed' }}{% endif %}</td>
+          {% for value in row['humans'] %}
+            <td>{% if value is none %}-{% else %}
+              <span class="{{ '' if value == row['judge'] else 'chip wait' }}">{{ 'Covered' if value else 'Missed' }}</span>{% endif %}</td>
+          {% endfor %}
+          <td class="hint">{% if row['evidence'] %}"{{ row['evidence'] }}"<br>{% endif %}{{ row['reason'] }}</td></tr>
+    {% endfor %}
+    {% if verdict['status'] == 'ok' %}
+    <tr><td>Unnecessary risk?</td>
+        <td>{% if verdict['unnecessary_risk'] is none %}n/a{% else %}{{ 'Yes' if verdict['unnecessary_risk'] else 'No' }}{% endif %}</td>
+        {% for grade in grades %}<td>{% if grade['risk'] is none %}n/a{% else %}{{ 'Yes' if grade['risk'] else 'No' }}{% endif %}</td>{% endfor %}
+        <td class="hint">{{ rationale.get('unnecessary_risk', '') }}</td></tr>
+    <tr><td>Poor approach?</td>
+        <td>{% if verdict['poor_approach'] is none %}n/a{% else %}{{ 'Yes' if verdict['poor_approach'] else 'No' }}{% endif %}</td>
+        {% for grade in grades %}<td>{% if grade['poor'] is none %}n/a{% else %}{{ 'Yes' if grade['poor'] else 'No' }}{% endif %}</td>{% endfor %}
+        <td class="hint">{{ rationale.get('poor_approach', '') }}</td></tr>
+    {% endif %}
+  </table>
+  {% for grade in grades if grade['comment'] %}
+    <p class="hint">{{ grade['grader'] }}'s comment: {{ grade['comment'] }}</p>
+  {% endfor %}
+</div>
+<div class="card">
+  <details open>
+    <summary style="cursor:pointer;font-weight:600">Case text</summary>
+    <p style="white-space:pre-wrap">{{ verdict['case_text'] }}</p>
+  </details>
+  <details open>
+    <summary style="cursor:pointer;font-weight:600">Answer text as the judge saw it</summary>
+    <p style="white-space:pre-wrap">{{ answer_text }}</p>
+  </details>
+  {% if verdict['raw_response'] %}
+  <details class="advanced">
+    <summary>The judge's raw reply</summary>
+    <pre style="white-space:pre-wrap;font-size:0.85rem">{{ verdict['raw_response'] }}</pre>
+  </details>
+  {% endif %}
+  <p><a class="btn secondary" href="{{ url_for('judge.config_page', config_id=config['id']) }}">Back to the judge</a></p>
+</div>
+{% endblock %}

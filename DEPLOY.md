@@ -138,6 +138,10 @@ padlock. Invite graders from the People page as usual.
 
 ### B6. Backups (do not skip)
 
+Note: if you use the AI judge, its API keys are stored in `study.db`
+(they are needed there because the server itself calls the judge), so
+treat backups of the data folder as private.
+
 `crontab -e` and add:
 
 ```

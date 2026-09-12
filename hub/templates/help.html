@@ -52,6 +52,26 @@
   rubric later only re-asks exactly what the change affects.</p>
 </div>
 
+<div class="card" id="judge">
+  <h1>The AI judge (PI)</h1>
+  <p><b>AI judge</b> lets an LLM grade answers the way you do - Covered /
+  Missed per rubric item, then the risk and approach questions - but it is
+  trusted only where it has been checked against real physician grades. A
+  verdict is <b>accepted only if every rubric item matches every
+  physician's judgment</b> on that answer; agreeing on the 0/1/2 score by
+  accident does not count. The judge page shows the acceptance rate, which
+  rubric items the judge reads differently from you (and whether it is
+  too lenient or too strict on each), and its written reason for every
+  mismatch.</p>
+  <p>Fix a rubric item's wording on the case's edit page and click
+  <b>Test</b> again: your grades carry over as usual, and only the judge is
+  re-run on what changed. The same happens when you change the judge's
+  model or instructions. Each judge records which model it is; by default
+  it skips answers from its own vendor (a model favouring its own family
+  is a known bias) - or let it judge them and the report shows the
+  acceptance rate for self-judged answers separately.</p>
+</div>
+
 <div class="card" id="pi">
   <h1>4. The PI's corner</h1>
   <p><b>Rankings</b> is the live leaderboard: every grade counts as a match
