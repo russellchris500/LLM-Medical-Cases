@@ -94,6 +94,7 @@
       <a href="{{ url_for('rankings.my_results') }}">My results</a>
     {% endif %}
     <a href="{{ url_for('grading.flags_page') }}">Rubric concerns</a>
+    <a href="{{ url_for('judge.judge_page') }}">AI judge</a>
     {% if user['role'] == 'pi' %}
       <a href="{{ url_for('rankings.rankings_page') }}">Rankings</a>
       <a href="{{ url_for('grading.assignments_page') }}">Cross-grading</a>

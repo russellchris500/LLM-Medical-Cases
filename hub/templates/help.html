@@ -1,5 +1,20 @@
 {% extends "layout.html" %}
-{% block title %}Help{% endblock %}
+{% block title %}Help<div class="card" id="judge">
+  <h1>5. Letting an AI judge</h1>
+  <p>On <a href="{{ url_for('judge.judge_page') }}">AI judge</a> you can ask
+  an API model to grade answers against the same rubric your graders use,
+  then see how well it agrees with them. A judge grade is <b>accepted</b>
+  only if it matches the human on <b>every</b> rubric item - close is not
+  enough. The page shows which items the judge misreads most; often the
+  fix is clearer rubric wording. Edit the rubric, click <b>Retest</b>, and
+  compare again. Every judge grade records exactly which model judged. By
+  default a judge never scores answers written by its own model (models
+  favor themselves); you can allow it per run, and those grades are
+  reported separately. Judge runs execute in Run AI Answers on your
+  computer, like answer runs, and judge scores never enter the main
+  rankings.</p>
+</div>
+{% endblock %}
 {% block content %}
 <div class="card">
   <h1>How the study works</h1>
@@ -61,5 +76,20 @@
   blinded second opinions. <b>People</b> invites graders (you email the
   invitation link yourself). The PI can also write, run, and grade cases
   like any grader.</p>
+</div>
+<div class="card" id="judge">
+  <h1>5. Letting an AI judge</h1>
+  <p>On <a href="{{ url_for('judge.judge_page') }}">AI judge</a> you can ask
+  an API model to grade answers against the same rubric your graders use,
+  then see how well it agrees with them. A judge grade is <b>accepted</b>
+  only if it matches the human on <b>every</b> rubric item - close is not
+  enough. The page shows which items the judge misreads most; often the
+  fix is clearer rubric wording. Edit the rubric, click <b>Retest</b>, and
+  compare again. Every judge grade records exactly which model judged. By
+  default a judge never scores answers written by its own model (models
+  favor themselves); you can allow it per run, and those grades are
+  reported separately. Judge runs execute in Run AI Answers on your
+  computer, like answer runs, and judge scores never enter the main
+  rankings.</p>
 </div>
 {% endblock %}

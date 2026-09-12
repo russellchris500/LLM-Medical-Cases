@@ -209,7 +209,52 @@ CREATE TABLE IF NOT EXISTS llm_models (
 );
 """
 
-# Future additive changes: append ("0008", "ALTER TABLE ...") entries.
+# LLM-as-a-judge. A judge run is executed by Run AI Answers on the
+# requester's computer (like an answer run); every judge grade records
+# exactly which model judged and whether it judged its own model's
+# answer. Judge grades never feed the main rankings - they are compared
+# with human grades on the AI judge pages.
+SCHEMA_0008 = """
+CREATE TABLE IF NOT EXISTS judge_runs (
+    id INTEGER PRIMARY KEY,
+    requested_by INTEGER NOT NULL REFERENCES users(id),
+    assigned_to INTEGER NOT NULL REFERENCES users(id),
+    judge_llm_id TEXT NOT NULL,
+    judge_model_name TEXT NOT NULL,
+    judge_variant TEXT NOT NULL,           -- model_slug(llm, model)
+    case_ids TEXT NOT NULL,                -- JSON list
+    allow_self INTEGER NOT NULL DEFAULT 0, -- may judge its own model's answers
+    rubric_versions TEXT NOT NULL DEFAULT '{}',  -- JSON {case_id: version}
+    status TEXT NOT NULL DEFAULT 'open'
+        CHECK (status IN ('open', 'done', 'failed', 'cancelled')),
+    status_note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS judge_grades (
+    id INTEGER PRIMARY KEY,
+    judge_run_id INTEGER NOT NULL REFERENCES judge_runs(id),
+    answer_id INTEGER NOT NULL REFERENCES answers(id),
+    judge_variant TEXT NOT NULL,
+    rubric_version INTEGER NOT NULL,
+    rubric_results TEXT NOT NULL DEFAULT '[]',  -- JSON list of booleans
+    unnecessary_risk INTEGER,
+    poor_approach INTEGER,
+    score INTEGER CHECK (score IN (0, 1, 2)),
+    rationale TEXT NOT NULL DEFAULT '{}',   -- JSON: evidence + reasons
+    raw_response TEXT NOT NULL DEFAULT '',
+    self_judged INTEGER NOT NULL DEFAULT 0, -- same model wrote the answer
+    same_site INTEGER NOT NULL DEFAULT 0,   -- same site, different model
+    thinking_setting TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'error')),
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    UNIQUE (judge_run_id, answer_id)
+);
+"""
+
+# Future additive changes: append ("0009", "ALTER TABLE ...") entries.
 MIGRATIONS = [
     ("0001", SCHEMA),
     ("0002", SCHEMA_0002),
@@ -218,6 +263,7 @@ MIGRATIONS = [
     ("0005", SCHEMA_0005),
     ("0006", SCHEMA_0006),
     ("0007", SCHEMA_0007),
+    ("0008", SCHEMA_0008),
 ]
 
 

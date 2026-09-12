@@ -1,0 +1,115 @@
+{% extends "layout.html" %}
+{% block title %}AI judge{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>AI judge - agreement with human grading</h1>
+  <p class="hint">An AI judge scores answers against the same rubric your
+  graders use. A judge grade is <b>accepted</b> only when it matches the
+  human grader on <b>every</b> rubric item. Compare, fix rubric wording
+  where they disagree, and retest - judge scores never enter the main
+  rankings.</p>
+  {% if report %}
+  <table>
+    <tr><th>Judge</th><th>Compared</th><th>Accepted</th>
+        <th>Not self-judged</th><th>Same site, other model</th>
+        <th>Self-judged</th><th>Final score agrees</th><th>Stale</th></tr>
+    {% for entry in report %}
+    <tr>
+      <td>{{ entry['variant'] }}</td>
+      <td>{{ entry['compared'] }}</td>
+      <td>{% if entry['percent'] is not none %}
+            <span class="chip {{ 'good' if entry['percent'] == 100 else 'wait' }}">
+              {{ entry['accepted'] }}/{{ entry['compared'] }} ({{ entry['percent'] }}%)</span>
+          {% else %}-{% endif %}</td>
+      {% for key in ('other', 'same_site', 'self') %}
+        {% set c = entry['by_category'][key] %}
+        <td>{% if c['compared'] %}{{ c['accepted'] }}/{{ c['compared'] }}{% else %}-{% endif %}</td>
+      {% endfor %}
+      <td>{{ entry['score_match'] }}/{{ entry['compared'] }}</td>
+      <td>{% if entry['stale'] %}<span class="chip wait">{{ entry['stale'] }} - retest</span>{% else %}0{% endif %}</td>
+    </tr>
+    {% if entry['item_misses'] %}
+    <tr><td colspan="8" class="hint">Rubric items this judge disagrees on most:
+      {% for miss in entry['item_misses'] %}
+        <a href="{{ url_for('judge.judge_case', case_id=miss['case_id']) }}">{{ miss['case_id'] }}
+        item {{ miss['index'] + 1 }}</a> ({{ miss['count'] }}x) "{{ miss['item'][:60] }}"{{ '; ' if not loop.last }}
+      {% endfor %}</td></tr>
+    {% endif %}
+    {% endfor %}
+  </table>
+  <p><a class="btn secondary" href="{{ url_for('judge.judge_csv') }}">Download the
+    comparison (CSV)</a></p>
+  {% else %}
+    <p>No judge grades yet. Create a judge run below.</p>
+  {% endif %}
+  {% if cases %}
+    <p class="hint">Per-case detail:
+    {% for case in cases %}<a href="{{ url_for('judge.judge_case', case_id=case['id']) }}">{{ case['id'] }}</a>{{ ', ' if not loop.last }}{% endfor %}</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h1>Test a judge</h1>
+  {% if not cases %}
+    <p>Nothing to test yet - a judge is compared against human grades, so
+    grade some answers first.</p>
+  {% else %}
+  <form method="post">
+    <label for="judge_model">Which model judges?</label>
+    <select id="judge_model" name="judge_model">
+      {% for value, label, row in choices %}
+        <option value="{{ value }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+    <p class="hint">Only API models can judge (they need no browser).
+    Add models on the Ask the AIs page.</p>
+    <label>Which cases? (only cases with human grades are listed)</label>
+    <div><label style="display:inline;font-weight:normal">
+      <input type="checkbox"
+             onclick="document.querySelectorAll('input[name=case_id]').forEach(c => c.checked = this.checked)">
+      <i>select all</i></label></div>
+    {% for case in cases %}
+      <div><label style="display:inline;font-weight:normal">
+        <input type="checkbox" name="case_id" value="{{ case['id'] }}" checked>
+        {{ case['id'] }} - {{ case['graded'] }} graded answer(s) - {{ case['text'][:70] }}</label></div>
+    {% endfor %}
+    <label>Its own answers</label>
+    <div><label style="display:inline;font-weight:normal">
+      <input type="checkbox" name="allow_self" value="1">
+      Let the judge score answers written by its own model (flagged and
+      reported separately - off by default because a model tends to favor
+      its own answers)</label></div>
+    <label>Whose computer runs it?</label>
+    <div><label style="display:inline;font-weight:normal">
+      <input type="radio" name="assignee" value="me" checked> Mine</label></div>
+    <div><label style="display:inline;font-weight:normal">
+      <input type="radio" name="assignee" value="pi"> The PI's</label></div>
+    <p><button class="btn" type="submit">Create the judge run</button></p>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h1>Judge runs</h1>
+  {% if runs %}
+  <table>
+    <tr><th>#</th><th>Judge</th><th>Cases</th><th>Own answers</th>
+        <th>Requested by</th><th>Status</th><th>Judged</th></tr>
+    {% for run in runs %}
+    <tr>
+      <td>{{ run['id'] }}</td>
+      <td>{{ run['judge_variant'] }}</td>
+      <td>{{ run['case_list'] }}</td>
+      <td>{{ 'included' if run['allow_self'] else 'skipped' }}</td>
+      <td>{{ run['requester_name'] }}</td>
+      <td>{% if run['status'] == 'done' %}<span class="chip good">done</span>
+          {% elif run['status'] == 'open' %}<span class="chip wait">waiting to run</span>
+          {% else %}<span class="chip idle">{{ run['status'] }}</span>{% endif %}
+          {% if run['status_note'] %} - {{ run['status_note'] }}{% endif %}</td>
+      <td>{{ run['done'] }} / {{ run['expected'] }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>No judge runs yet.</p>{% endif %}
+</div>
+{% endblock %}

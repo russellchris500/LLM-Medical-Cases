@@ -37,6 +37,15 @@
           by themselves.</div>
       </a>
     {% endif %}
+    {% if counts['judge_runs'] %}
+      <a class="action" href="{{ url_for('judge.judge_page') }}">
+        <div class="num">{{ counts['judge_runs'] }}</div>
+        <div class="what">AI judge run{{ '' if counts['judge_runs'] == 1 else 's' }}
+          waiting for your computer</div>
+        <div class="why">Open "Run AI Answers" and start the judge run;
+          the agreement report fills in as it judges.</div>
+      </a>
+    {% endif %}
     {% if counts['flags'] %}
       <a class="action" href="{{ url_for('grading.flags_page') }}">
         <div class="num">{{ counts['flags'] }}</div>

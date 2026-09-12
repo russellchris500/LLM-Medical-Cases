@@ -1,0 +1,89 @@
+{% extends "layout.html" %}
+{% block title %}AI judge - {{ case['id'] }}{% endblock %}
+{% block content %}
+<style>
+  .marks td, .marks th { text-align:center; padding:4px 6px; }
+  .marks td.miss { background:#fdecec; font-weight:700; }
+  .marks td.first { text-align:left; }
+</style>
+<div class="card">
+  <h1>AI judge vs human grading - case {{ case['id'] }}
+    <span class="hint" style="font-weight:normal">(rubric version {{ case['rubric_version'] }})</span></h1>
+  <ol>{% for item in rubric %}<li>{{ item }}</li>{% endfor %}</ol>
+  <p>
+    <a class="btn secondary" href="{{ url_for('cases.edit_case', case_id=case['id']) }}">Edit the rubric</a>
+    {% for prev in previous %}
+      <form method="post" style="display:inline"
+            action="{{ url_for('judge.retest', case_id=case['id']) }}">
+        <input type="hidden" name="judge_llm_id" value="{{ prev['judge_llm_id'] }}">
+        <input type="hidden" name="judge_model_name" value="{{ prev['judge_model_name'] }}">
+        <input type="hidden" name="allow_self" value="{{ prev['allow_self'] }}">
+        <button class="btn" type="submit">Retest judge {{ prev['judge_model_name'] }} on this case</button>
+      </form>
+    {% endfor %}
+    <a class="btn secondary" href="{{ url_for('judge.judge_page') }}">Back</a>
+  </p>
+  <p class="hint">C = covered, M = missed. A red cell is where the judge
+  disagrees with a human. "Accepted" needs every item to agree with every
+  human grader. After a rubric edit, earlier judge grades show as stale -
+  retest to compare under the new wording.</p>
+</div>
+
+{% for answer in answers %}
+<div class="card">
+  <h1 style="font-size:1.05rem">Answer by {{ answer['model'] }}</h1>
+  <table class="marks">
+    <tr><th class="first">Grader</th>
+        {% for item in rubric %}<th>{{ loop.index }}</th>{% endfor %}
+        <th>Risk</th><th>Poor</th><th>Score</th><th>Verdict</th></tr>
+    {% if not answer['humans'] %}
+    <tr><td class="first hint" colspan="{{ rubric|length + 5 }}">No complete human
+      grade at the current rubric version (it may be waiting to be finished).</td></tr>
+    {% endif %}
+    {% for human in answer['humans'] %}
+    <tr>
+      <td class="first">{{ human['grader'] }} (human)</td>
+      {% for r in human['results'] %}<td>{{ 'C' if r else 'M' }}</td>{% endfor %}
+      <td>{{ {1: 'yes', 0: 'no'}.get(human['risk'], '-') }}</td>
+      <td>{{ {1: 'yes', 0: 'no'}.get(human['poor'], '-') }}</td>
+      <td>{{ human['score'] }}</td><td></td>
+    </tr>
+    {% endfor %}
+    {% for judge in answer['judges'] %}
+    <tr>
+      <td class="first">{{ judge['variant'] }} (AI judge{% if judge['category'] == 'self' %}, own answer{% elif judge['category'] == 'same_site' %}, same site{% endif %})</td>
+      {% for r in judge['results'] %}
+        <td class="{{ 'miss' if loop.index0 in judge['mismatched'] else '' }}">{{ 'C' if r else 'M' }}</td>
+      {% endfor %}
+      <td>{{ {1: 'yes', 0: 'no'}.get(judge['risk'], '-') }}</td>
+      <td>{{ {1: 'yes', 0: 'no'}.get(judge['poor'], '-') }}</td>
+      <td>{{ judge['score'] }}</td>
+      <td>{% if judge['stale'] %}<span class="chip wait">stale - retest</span>
+          {% elif judge['accepted'] is none %}<span class="chip idle">no human grade to compare yet</span>
+          {% elif judge['accepted'] %}<span class="chip good">accepted</span>
+          {% else %}<span class="chip wait">not accepted</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% for judge in answer['judges'] %}
+    <details style="margin-top:8px">
+      <summary style="cursor:pointer">What {{ judge['variant'] }} saw for each item</summary>
+      <ol>
+        {% for item in rubric %}
+          {% set i = loop.index0 %}
+          <li{% if i in judge['mismatched'] %} style="color:#a11"{% endif %}>
+            <b>{{ 'Covered' if judge['results'][i] else 'Missed' }}</b>
+            {% if i in judge['mismatched'] %}(human disagrees){% endif %}:
+            <i>{{ judge['evidence'][i] if i < judge['evidence']|length else '' }}</i></li>
+        {% endfor %}
+      </ol>
+      {% if judge['risk_reason'] %}<p class="hint">Risk: {{ judge['risk_reason'] }}</p>{% endif %}
+      {% if judge['poor_reason'] %}<p class="hint">Approach: {{ judge['poor_reason'] }}</p>{% endif %}
+    </details>
+  {% endfor %}
+</div>
+{% endfor %}
+{% if not answers %}
+<div class="card"><p>No human-graded answers on this case yet.</p></div>
+{% endif %}
+{% endblock %}

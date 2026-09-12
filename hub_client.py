@@ -129,6 +129,25 @@ class HubClient:
         body, content_type = encode_multipart(fields, files)
         return self._request("POST", "/api/runner/answers", body, content_type)
 
+    # ---- LLM-as-a-judge runs ----
+
+    def judge_runs(self):
+        return self._request("GET", "/api/runner/judge-runs")["judge_runs"]
+
+    def upload_judge_grade(self, run_id, payload):
+        body = dict(payload, judge_run_id=run_id)
+        return self._request(
+            "POST", "/api/runner/judge-grades",
+            json.dumps(body).encode("utf-8"), "application/json",
+        )
+
+    def set_judge_run_status(self, run_id, status, note=""):
+        body = json.dumps({"status": status, "note": note}).encode("utf-8")
+        return self._request(
+            "POST", "/api/runner/judge-runs/{}/status".format(run_id),
+            body, "application/json",
+        )
+
     def set_job_status(self, job_id, status, note=""):
         body = json.dumps({"status": status, "note": note}).encode("utf-8")
         return self._request(

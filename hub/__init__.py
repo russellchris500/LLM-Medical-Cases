@@ -40,7 +40,7 @@ def create_app(instance_dir=None, secret_key=None):
 
     hub_db.init_app(app)
 
-    from . import auth, cases, grading, home, rankings, runner_api, runs
+    from . import auth, cases, grading, home, judge, rankings, runner_api, runs
 
     app.register_blueprint(auth.bp)
     app.register_blueprint(cases.bp)
@@ -49,6 +49,7 @@ def create_app(instance_dir=None, secret_key=None):
     app.register_blueprint(grading.bp)
     app.register_blueprint(rankings.bp)
     app.register_blueprint(home.bp)
+    app.register_blueprint(judge.bp)
 
     @app.route("/")
     def index():

@@ -17,6 +17,11 @@ import os
 
 from eval_common import AnswersStore, OK_STATUSES, SettingsStore, model_slug
 from hub_client import HubClient, HubError
+from llm_api import ApiCallError, ModelAbort, call_api_model
+from llm_judge import (
+    JudgeParseError, build_judge_prompt, parse_judge_response,
+    test_model_verdict,
+)
 from run_llms import (
     build_worklist, model_catalog, run_everything,
 )
@@ -204,6 +209,140 @@ def finish_job(job, settings, ok, failed, uploads_failed, ui):
         ))
 
 
+# ---------- LLM-as-a-judge runs ----------
+
+
+def judge_entry(run, settings, log):
+    """The catalog entry acting as judge (API sites and the test model
+    only - a judge needs no browser), with the run's model name."""
+    saved_flag = settings.data["options"].get("enable_test_model", False)
+    if run["judge_llm_id"] == "testmodel":
+        settings.data["options"]["enable_test_model"] = True
+    try:
+        catalog = {e["model_id"]: e for e in model_catalog(settings)}
+    finally:
+        settings.data["options"]["enable_test_model"] = saved_flag
+    base = catalog.get(run["judge_llm_id"])
+    if base is None or base["kind"] == "browser":
+        log("  This computer cannot act as judge {} - only API models can "
+            "judge.".format(run["judge_llm_id"]))
+        return None
+    entry = dict(base)
+    entry["model_name"] = run["judge_model_name"] or entry["model_name"]
+    entry["variant_id"] = model_slug(entry["model_id"], entry["model_name"])
+    return entry
+
+
+def run_judge_run(run, settings, ui):
+    """Judge every answer in the run; returns (ok, failed, uploads_failed).
+    Answers already judged (on the website or in the local resume file)
+    are skipped, so an interrupted run picks up where it stopped."""
+    client = hub_client_from(settings)
+    entry = judge_entry(run, settings, ui.log)
+    if entry is None:
+        return 0, 0, 0
+    workdir = os.path.join(JOBS_DIR, "judge_{}".format(run["id"]))
+    os.makedirs(workdir, exist_ok=True)
+    resume_path = os.path.join(workdir, "judged.json")
+    try:
+        with open(resume_path, "r", encoding="utf-8") as f:
+            judged = set(json.load(f))
+    except (OSError, ValueError):
+        judged = set()
+    judged |= set(run.get("done_answer_ids", []))
+    answers = [a for a in run["answers"] if a["answer_id"] not in judged]
+    skipped = len(run["answers"]) - len(answers)
+    if skipped:
+        ui.log("  {} answer(s) already judged - skipped.".format(skipped))
+    ui.log("  Judge: {} - {} answer(s) to judge.".format(
+        entry["variant_id"], len(answers)))
+    options = settings.data["options"]
+    ok = failed = uploads_failed = 0
+    for position, answer in enumerate(answers, start=1):
+        if ui.stop_requested:
+            ui.log("  Stopped.")
+            break
+        rubric = answer["rubric"]
+        prompt = build_judge_prompt(
+            answer["case_text"], rubric, answer["response_text"],
+            answer.get("image_count", 0),
+        )
+        payload = {"answer_id": answer["answer_id"],
+                   "rubric_version": answer["rubric_version"]}
+        text = ""
+        try:
+            if entry["kind"] == "test":
+                text = test_model_verdict(len(rubric))
+                thinking = "test model"
+            else:
+                settings_entry = dict(settings.api_model(entry["model_id"]))
+                settings_entry["model"] = entry["model_name"]
+                result = call_api_model(
+                    entry["model_id"], settings_entry, prompt, options,
+                    log=ui.log,
+                )
+                text = result["response_text"]
+                thinking = result.get("thinking_setting", "")
+            parsed = parse_judge_response(text, len(rubric))
+            payload.update(
+                status="ok", results=parsed["results"],
+                evidence=parsed["evidence"],
+                unnecessary_risk=parsed["unnecessary_risk"],
+                risk_reason=parsed["risk_reason"],
+                poor_approach=parsed["poor_approach"],
+                poor_reason=parsed["poor_reason"],
+                raw_response=text, thinking_setting=thinking,
+            )
+        except ModelAbort as error:
+            ui.log("  {} - stopping this judge run.".format(error))
+            failed += len(answers) - position + 1
+            break
+        except (ApiCallError, JudgeParseError) as error:
+            payload.update(status="error", error=str(error), raw_response=text)
+        try:
+            response = client.upload_judge_grade(run["id"], payload)
+        except HubError as error:
+            uploads_failed += 1
+            ui.log("  Upload failed for answer #{}: {}".format(
+                answer["answer_id"], error))
+            continue
+        if payload["status"] == "ok":
+            ok += 1
+            judged.add(answer["answer_id"])
+            with open(resume_path, "w", encoding="utf-8") as f:
+                json.dump(sorted(judged), f)
+            ui.log("  [{}/{}] {} x answer #{} - judged, score {}".format(
+                position, len(answers), answer["case_id"],
+                answer["answer_id"], response.get("score")))
+        else:
+            failed += 1
+            ui.log("  [{}/{}] {} x answer #{} - FAILED: {}".format(
+                position, len(answers), answer["case_id"],
+                answer["answer_id"], payload.get("error")))
+    return ok, failed, uploads_failed
+
+
+def finish_judge_run(run, settings, ok, failed, uploads_failed, ui):
+    client = hub_client_from(settings)
+    if uploads_failed:
+        ui.log("Judge run #{} stays open: {} upload(s) failed - start it "
+               "again to retry.".format(run["id"], uploads_failed))
+        return
+    if ok and not failed:
+        client.set_judge_run_status(run["id"], "done", "{} judged".format(ok))
+        ui.log("Judge run #{} is done ({} answers judged) - see the AI judge "
+               "page on the website.".format(run["id"], ok))
+    elif ok:
+        client.set_judge_run_status(
+            run["id"], "done", "{} judged, {} failed".format(ok, failed))
+        ui.log("Judge run #{} finished with {} failure(s).".format(
+            run["id"], failed))
+    else:
+        client.set_judge_run_status(run["id"], "failed", "no answers judged")
+        ui.log("Judge run #{} judged nothing - marked failed on the "
+               "website.".format(run["id"]))
+
+
 # ---------- window interface ----------
 
 
@@ -240,8 +379,12 @@ def main():
     tk.Label(middle, text="Runs waiting for this computer:", anchor="w").pack(
         fill="x"
     )
-    jobs_list = tk.Listbox(middle, height=8)
+    jobs_list = tk.Listbox(middle, height=6)
     jobs_list.pack(fill="x", pady=4)
+    tk.Label(middle, text="AI judge runs waiting for this computer:",
+             anchor="w").pack(fill="x")
+    judge_list = tk.Listbox(middle, height=4)
+    judge_list.pack(fill="x", pady=4)
     buttons = tk.Frame(middle)
     buttons.pack(fill="x")
     log = gui_common.LogBox(middle, height=14).pack(
@@ -249,6 +392,7 @@ def main():
     )
     task = gui_common.BackgroundTask(root, log.log)
     current_jobs = []
+    current_judge_runs = []
 
     def refresh_jobs():
         save_hub()
@@ -266,6 +410,41 @@ def main():
                 job["requested_by"],
             ))
         log.log("{} run(s) waiting.".format(len(jobs)))
+        try:
+            judge_runs = hub_client_from(settings).judge_runs()
+        except HubError as error:
+            judge_runs = []
+            log.log("(judge runs unavailable: {})".format(error))
+        current_judge_runs.clear()
+        current_judge_runs.extend(judge_runs)
+        judge_list.delete(0, "end")
+        for run in judge_runs:
+            judge_list.insert("end", "#{}  judge {}  {} answer(s)  (from {})".format(
+                run["id"], run["judge_variant"], len(run["answers"]),
+                run["requested_by"],
+            ))
+        if judge_runs:
+            log.log("{} judge run(s) waiting.".format(len(judge_runs)))
+
+    def judge_selected():
+        if task.running:
+            messagebox.showinfo("Busy", "A run is already going.", parent=root)
+            return
+        selection = judge_list.curselection()
+        if not selection:
+            messagebox.showinfo("Nothing selected", "Click a judge run first.",
+                                parent=root)
+            return
+        run = current_judge_runs[selection[0]]
+
+        def work(ui):
+            ui.log("Starting judge run #{}...".format(run["id"]))
+            ok, failed, uploads_failed = run_judge_run(run, settings, ui)
+            finish_judge_run(run, settings, ok, failed, uploads_failed, ui)
+
+        task.start(work, on_done=lambda r, e: (
+            log.log("Problem: {}".format(e)) if e else refresh_jobs()
+        ))
 
     def run_selected():
         if task.running:
@@ -306,6 +485,8 @@ def main():
     tk.Button(buttons, text="Start the selected run", command=run_selected).pack(
         side="left", padx=6
     )
+    tk.Button(buttons, text="Start the selected judge run",
+              command=judge_selected).pack(side="left", padx=6)
     tk.Button(buttons, text="Stop", command=stop).pack(side="left")
 
     if hub.get("url") and hub.get("token"):

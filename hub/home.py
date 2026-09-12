@@ -18,7 +18,7 @@ def dashboard_counts(db):
     """Everything the home page shows, cheapest queries first."""
     counts = {
         "to_grade": 0, "to_finish": 0, "reruns": 0, "open_jobs": 0,
-        "flags": 0, "cases": 0,
+        "flags": 0, "cases": 0, "judge_runs": 0,
     }
     user_id = g.user["id"]
     if is_grader(g.user):
@@ -47,6 +47,11 @@ def dashboard_counts(db):
             "AND case_id IN (SELECT id FROM cases WHERE owner_id = ?)",
             (user_id,),
         ).fetchone()["n"]
+    counts["judge_runs"] = db.execute(
+        "SELECT COUNT(*) AS n FROM judge_runs WHERE assigned_to = ? "
+        "AND status = 'open'",
+        (user_id,),
+    ).fetchone()["n"]
     counts["open_jobs"] = db.execute(
         "SELECT COUNT(*) AS n FROM run_jobs WHERE assigned_to = ? "
         "AND status = 'open'",
